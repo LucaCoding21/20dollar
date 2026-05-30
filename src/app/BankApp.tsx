@@ -29,6 +29,14 @@ const CATEGORY_SLUGS = [
   "clothes", "gifts", "bills", "health", "shopping",
 ] as const;
 
+// Friendly label shown in the analytics "Where it went" breakdown. Mirrors the
+// everyday words the couple uses (food → "Snacks", transport → "Bus").
+const CATEGORY_LABEL: Record<string, string> = {
+  coffee: "Coffee", food: "Snacks", groceries: "Groceries", transport: "Bus",
+  fun: "Fun", clothes: "Clothes", gifts: "Gifts", bills: "Bills",
+  health: "Health", shopping: "Shopping",
+};
+
 // Keyword + merchant/brand lexicon. Multi-word entries (with a space) are
 // matched as phrases and weighted highest, so "uber eats" lands in food, not
 // transport. Lists lean Vancouver-local since that's who uses this.
@@ -504,7 +512,11 @@ export default function BankApp() {
   const [error, setError] = useState<string | null>(null);
 
   // Which screen is showing. Home tab = home/all; Goals tab = goals/allGoals.
-  const [view, setView] = useState<"home" | "all" | "goals" | "allGoals">("home");
+  const [view, setView] = useState<
+    "home" | "all" | "goals" | "allGoals" | "analytics" | "category"
+  >("home");
+  // The category whose full history is showing on the "category" screen.
+  const [categorySlug, setCategorySlug] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | Person>("all");
   const [editing, setEditing] = useState<Expense | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Expense | null>(null);
@@ -761,6 +773,36 @@ export default function BankApp() {
     </>
   );
 
+  if (view === "analytics") {
+    return (
+      <AnalyticsScreen
+        expenses={expenses}
+        loading={loading}
+        now={now}
+        onHome={() => setView("home")}
+        onGoals={() => setView("goals")}
+        onViewCategory={(slug) => {
+          setCategorySlug(slug);
+          setView("category");
+        }}
+      />
+    );
+  }
+
+  if (view === "category" && categorySlug) {
+    return (
+      <CategoryActivityScreen
+        slug={categorySlug}
+        expenses={expenses}
+        loading={loading}
+        now={now}
+        onBack={() => setView("analytics")}
+        onHome={() => setView("home")}
+        onGoals={() => setView("goals")}
+      />
+    );
+  }
+
   if (view === "all") {
     return (
       <AllActivityScreen
@@ -971,7 +1013,12 @@ export default function BankApp() {
         </section>
       </div>
 
-      <BottomNav tab="home" onHome={() => setView("home")} onGoals={() => setView("goals")} />
+      <BottomNav
+        tab="home"
+        onHome={() => setView("home")}
+        onGoals={() => setView("goals")}
+        onAnalytics={() => setView("analytics")}
+      />
     </div>
   );
 }
@@ -1009,16 +1056,18 @@ function NavItem({
   );
 }
 
-// Shared bottom nav. `tab` highlights the active section; Home and Goals route,
-// Analytics and Settings aren't built yet (no-ops).
+// Shared bottom nav. `tab` highlights the active section; Home, Analytics, and
+// Goals route. Settings isn't built yet (no-op).
 function BottomNav({
   tab,
   onHome,
   onGoals,
+  onAnalytics,
 }: {
-  tab: "home" | "goals";
+  tab: "home" | "goals" | "analytics";
   onHome: () => void;
   onGoals: () => void;
+  onAnalytics?: () => void;
 }) {
   const blue = "#2f63e6";
   const dark = "#1f1f1f";
@@ -1032,7 +1081,12 @@ function BottomNav({
             onClick={onHome}
             icon={<HomeIcon className="w-5" color={tab === "home" ? blue : dark} />}
           />
-          <NavItem label="Analytics" icon={<BarsIcon className="w-5" />} />
+          <NavItem
+            label="Analytics"
+            active={tab === "analytics"}
+            onClick={onAnalytics}
+            icon={<BarsIcon className="w-5" color={tab === "analytics" ? blue : dark} />}
+          />
           <NavItem
             label="Goals"
             active={tab === "goals"}
@@ -2010,6 +2064,601 @@ function GoalFormModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Analytics screen                                                  */
+/* ------------------------------------------------------------------ */
+
+function CalendarIcon({ className = "", color = "#2b2b2b" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="3" stroke={color} strokeWidth="2" />
+      <path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BagIcon({ className = "", color = "#2b2b2b" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M6 8h12l-1 12.5H7L6 8Z"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path d="M9 9.5V7a3 3 0 0 1 6 0v2.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const VANCOUVER_TZ = VANCOUVER;
+const WEEKDAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+
+function vanYMD(d: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: VANCOUVER_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)!.value);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+function dayNum(p: { year: number; month: number; day: number }): number {
+  return Math.floor(Date.UTC(p.year, p.month - 1, p.day) / 86_400_000);
+}
+
+// Day of week in Vancouver as 0=Mon … 6=Sun.
+function vanWeekdayMon0(d: Date): number {
+  const wd = new Intl.DateTimeFormat("en-US", {
+    timeZone: VANCOUVER_TZ,
+    weekday: "short",
+  }).format(d);
+  const idx = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(wd);
+  return idx < 0 ? 0 : idx;
+}
+
+// Day-number of this Vancouver week's Monday.
+function currentWeekStart(now: Date): number {
+  return dayNum(vanYMD(now)) - vanWeekdayMon0(now);
+}
+
+function isThisWeek(iso: string, now: Date): boolean {
+  const i = dayNum(vanYMD(new Date(iso))) - currentWeekStart(now);
+  return i >= 0 && i <= 6;
+}
+
+// The category slug an expense rolls up to (unknown/blank → "shopping").
+function expenseSlug(e: Expense): string {
+  return e.category && CATEGORY_LABEL[e.category] ? e.category : "shopping";
+}
+
+// "Today · 4:20 PM" / "Yesterday · 5:33 PM" / "Thursday · 4:20 PM" — weekday
+// names within the current week, civil dates compared in Vancouver time.
+function formatWeekdayWhen(iso: string, now: Date): string {
+  const d = new Date(iso);
+  const civil = (x: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: VANCOUVER_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(x);
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: VANCOUVER_TZ,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+
+  const that = civil(d);
+  let label: string;
+  if (that === civil(now)) label = "Today";
+  else if (that === civil(new Date(now.getTime() - 86_400_000))) label = "Yesterday";
+  else label = new Intl.DateTimeFormat("en-US", { timeZone: VANCOUVER_TZ, weekday: "long" }).format(d);
+
+  return `${label} · ${time}`;
+}
+
+type WeekStats = {
+  spent: number;
+  avgPerDay: number;
+  underBudget: number;
+  daily: number[]; // Mon..Sun spend
+  byPerson: Record<Person, number>;
+  byCategory: { slug: string; amount: number }[];
+};
+
+// Everything on the analytics screen is scoped to the current Vancouver week
+// (Mon–Sun). Spends are positive amounts; paid-back rows are ignored here.
+function weekStats(expenses: Expense[], now: Date): WeekStats {
+  const weekStart = currentWeekStart(now);
+  const daily = [0, 0, 0, 0, 0, 0, 0];
+  const byPerson: Record<Person, number> = { luca: 0, irish: 0 };
+  const catMap = new Map<string, number>();
+
+  for (const e of expenses) {
+    const amt = Number(e.amount);
+    if (amt <= 0) continue; // only spends
+    const idx = dayNum(vanYMD(new Date(e.created_at))) - weekStart;
+    if (idx < 0 || idx > 6) continue;
+    daily[idx] += amt;
+    byPerson[e.person] += amt;
+    const slug = expenseSlug(e);
+    catMap.set(slug, (catMap.get(slug) ?? 0) + amt);
+  }
+
+  const spent = daily.reduce((s, v) => s + v, 0);
+  const activeDays = daily.filter((v) => v > 0).length;
+  // Average per active weekday (Mon–Fri) — the headline "Avg / day".
+  const activeWeekdays = daily.slice(0, 5).filter((v) => v > 0).length;
+  const avgPerDay = spent / Math.max(1, activeWeekdays);
+  // "Under budget" = days you came in below your daily pace.
+  const pace = spent / Math.max(1, activeDays);
+  const underBudget = daily.filter((v) => v > 0 && v < pace).length;
+
+  const byCategory = [...catMap.entries()]
+    .map(([slug, amount]) => ({ slug, amount }))
+    .sort((a, b) => {
+      if (b.amount !== a.amount) return b.amount - a.amount;
+      return (
+        (CATEGORY_SLUGS as readonly string[]).indexOf(a.slug) -
+        (CATEGORY_SLUGS as readonly string[]).indexOf(b.slug)
+      );
+    });
+
+  return { spent, avgPerDay, underBudget, daily, byPerson, byCategory };
+}
+
+// Donut split of the bank between the two people. Luca is the blue arc, Irish
+// the pink remainder; the total sits in the hole.
+function SplitDonut({ luca, irish }: { luca: number; irish: number }) {
+  const total = luca + irish;
+  const r = 52;
+  const c = 2 * Math.PI * r;
+  const lucaFrac = total > 0 ? luca / total : 0;
+  return (
+    <svg viewBox="0 0 140 140" className="h-[118px] w-[118px]">
+      <g transform="translate(140,0) scale(-1,1) rotate(-90 70 70)">
+        <circle cx="70" cy="70" r={r} fill="none" stroke="#f4abce" strokeWidth="17" />
+        <circle
+          cx="70"
+          cy="70"
+          r={r}
+          fill="none"
+          stroke="#5e8be8"
+          strokeWidth="17"
+          strokeDasharray={`${lucaFrac * c} ${c}`}
+          strokeLinecap="round"
+        />
+      </g>
+      <text x="70" y="66" textAnchor="middle" className="fill-[#2b2b2b]" style={{ fontSize: 26 }}>
+        {money(total)}
+      </text>
+      <text x="70" y="84" textAnchor="middle" className="fill-[#a9a9b0]" style={{ fontSize: 12 }}>
+        total
+      </text>
+    </svg>
+  );
+}
+
+function AnalyticsScreen({
+  expenses,
+  loading,
+  now,
+  onHome,
+  onGoals,
+  onViewCategory,
+}: {
+  expenses: Expense[];
+  loading: boolean;
+  now: Date;
+  onHome: () => void;
+  onGoals: () => void;
+  onViewCategory: (slug: string) => void;
+}) {
+  const stats = useMemo(() => weekStats(expenses, now), [expenses, now]);
+  const [sheetSlug, setSheetSlug] = useState<string | null>(null);
+  const lucaPct = stats.spent > 0 ? Math.round((stats.byPerson.luca / stats.spent) * 100) : 0;
+  const irishPct = stats.spent > 0 ? 100 - lucaPct : 0;
+  const catMax = Math.max(1, ...stats.byCategory.map((c) => c.amount));
+  const top = stats.byCategory.slice(0, 5);
+  const maxDaily = Math.max(1, ...stats.daily);
+
+  return (
+    <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
+      <div className="flex flex-1 flex-col gap-2.5 px-4 pb-24 pt-[max(env(safe-area-inset-top),14px)]">
+        <div className="flex items-center justify-center py-1.5">
+          <h1 className="text-[20px] text-[#2b2b2b]">Analytics</h1>
+        </div>
+
+        {/* ---- This week ---- */}
+        <section className="rounded-[22px] bg-white px-4 pt-3 pb-3.5 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+          <div className="mb-2.5 flex items-center gap-2">
+            <h2 className="text-[16px] text-[#2b2b2b]">This week</h2>
+            <CalendarIcon className="w-4" color="#9aa0ab" />
+          </div>
+          <div className="flex items-stretch divide-x divide-[#eef1f8]">
+            <Stat label="Spent" value={loading ? "—" : money(stats.spent)} className="pr-2" />
+            <Stat
+              label="Avg / day"
+              value={loading ? "—" : `$${stats.avgPerDay.toFixed(2)}`}
+              className="px-2"
+            />
+            <Stat
+              label="Under budget"
+              value={loading ? "—" : `${stats.underBudget}`}
+              unit="days"
+              className="pl-2"
+            />
+          </div>
+        </section>
+
+        {/* ---- Spending split ---- */}
+        <section className="rounded-[22px] bg-white px-4 pt-3 pb-3.5 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+          <div className="mb-1 flex items-center gap-1.5">
+            <h2 className="text-[16px] text-[#2b2b2b]">Spending split</h2>
+            <HeartIcon className="w-3.5" color="#f3a6c9" />
+          </div>
+          <div className="flex items-center justify-between">
+            <SplitPerson person="luca" amount={stats.byPerson.luca} heartColor="#2f63e6" />
+            <SplitDonut luca={stats.byPerson.luca} irish={stats.byPerson.irish} />
+            <SplitPerson person="irish" amount={stats.byPerson.irish} heartColor="#f3a6c9" align="right" />
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[12px] text-[#5e8be8]">{lucaPct}%</span>
+            <div className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-[#f0f2f7]">
+              <div className="h-full bg-[#5e8be8]" style={{ width: `${lucaPct}%` }} />
+              <div className="h-full flex-1 bg-[#f4abce]" />
+            </div>
+            <span className="text-[12px] text-[#e58fb6]">{irishPct}%</span>
+          </div>
+        </section>
+
+        {/* ---- Where it went ---- */}
+        <section className="rounded-[22px] bg-white px-4 pt-3 pb-2 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+          <div className="mb-2 flex items-center gap-2">
+            <h2 className="text-[16px] text-[#2b2b2b]">Where it went</h2>
+            <BagIcon className="w-4" color="#9aa0ab" />
+          </div>
+          {top.length === 0 ? (
+            <p className="py-3 text-center text-[12px] text-[#a9a9b0]">No spending yet this week.</p>
+          ) : (
+            <ul>
+              {top.map((c) => (
+                <li key={c.slug}>
+                  <button
+                    type="button"
+                    onClick={() => setSheetSlug(c.slug)}
+                    className="flex w-full items-center gap-2.5 py-2 text-left transition active:scale-[0.99]"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={categoryIcon(c.slug)} alt="" className="h-6 w-6 shrink-0 object-contain" />
+                    <span className="w-[58px] shrink-0 text-[14px] text-[#2b2b2b]">
+                      {CATEGORY_LABEL[c.slug] ?? c.slug}
+                    </span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#eef1f7]">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-[#6f9af0] to-[#5a86e6]"
+                        style={{ width: `${Math.max(8, (c.amount / catMax) * 100)}%` }}
+                      />
+                    </div>
+                    <span className="w-9 shrink-0 text-right text-[14px] text-[#2b2b2b]">
+                      {money(c.amount)}
+                    </span>
+                    <ChevronRightIcon className="w-4 shrink-0" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* ---- Daily spend ---- */}
+        <section className="rounded-[22px] bg-white px-4 pt-3 pb-3 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-[16px] text-[#2b2b2b]">Daily spend</h2>
+              <BarsIcon className="w-4" color="#9aa0ab" />
+            </div>
+            <HeartIcon className="w-3.5" color="#2b2b2b" />
+          </div>
+          <div className="relative mt-1 flex h-[124px] items-end justify-between gap-1.5 px-0.5 pt-5">
+            {stats.daily.map((v, i) => (
+              <div key={i} className="flex flex-1 flex-col items-center justify-end gap-1">
+                {v > 0 && <span className="text-[10px] text-[#9aa0ab]">{money(v)}</span>}
+                <div
+                  className="w-[62%] rounded-t-[6px] bg-gradient-to-b from-[#6f9af0] to-[#5a86e6]"
+                  style={{ height: `${Math.max(v > 0 ? 6 : 0, (v / maxDaily) * 84)}px` }}
+                />
+              </div>
+            ))}
+            {/* weekly average line */}
+            {stats.spent > 0 && (
+              <div
+                className="pointer-events-none absolute inset-x-0 z-10 flex items-center"
+                style={{ bottom: `${(stats.avgPerDay / maxDaily) * 84}px` }}
+              >
+                <div className="flex-1 border-t-2 border-dotted border-[#9bb0d6]" />
+                <span className="ml-1 shrink-0 rounded-full bg-[#eef3fb] px-1.5 py-[1px] text-[9px] text-[#5e8be8]">
+                  avg {money(stats.avgPerDay)}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="mt-1.5 flex justify-between px-0.5">
+            {WEEKDAY_LETTERS.map((d, i) => (
+              <span key={i} className="flex-1 text-center text-[11px] text-[#9aa0ab]">
+                {d}
+              </span>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {sheetSlug && (
+        <CategoryDetailSheet
+          slug={sheetSlug}
+          expenses={expenses}
+          now={now}
+          stats={stats}
+          onClose={() => setSheetSlug(null)}
+          onViewAll={() => {
+            const slug = sheetSlug;
+            setSheetSlug(null);
+            onViewCategory(slug);
+          }}
+        />
+      )}
+
+      <BottomNav tab="analytics" onHome={onHome} onGoals={onGoals} onAnalytics={() => {}} />
+    </div>
+  );
+}
+
+function BulbIcon({ className = "", color = "#6b7686" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.9 1 1 1.6l.2 1.1h4.8l.2-1.1c.1-.6.5-1.2 1-1.6A6 6 0 0 0 12 3Z"
+        stroke={color}
+        strokeWidth="1.9"
+        strokeLinejoin="round"
+      />
+      <path d="M9.6 19.5h4.8M10.4 22h3.2" stroke={color} strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Bottom sheet opened from a "Where it went" row: this week's spend in the
+// category, who spent it, and a quick insight + link to the full history.
+function CategoryDetailSheet({
+  slug,
+  expenses,
+  now,
+  stats,
+  onClose,
+  onViewAll,
+}: {
+  slug: string;
+  expenses: Expense[];
+  now: Date;
+  stats: WeekStats;
+  onClose: () => void;
+  onViewAll: () => void;
+}) {
+  const label = CATEGORY_LABEL[slug] ?? slug;
+  const rows = expenses
+    .filter((e) => Number(e.amount) > 0 && expenseSlug(e) === slug && isThisWeek(e.created_at, now))
+    .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  const total = rows.reduce((s, e) => s + Number(e.amount), 0);
+  const pct = stats.spent > 0 ? Math.round((total / stats.spent) * 100) : 0;
+  const rank = stats.byCategory.findIndex((c) => c.slug === slug) + 1;
+  const plural = label.endsWith("s") ? "were" : "was";
+  const insight =
+    rank === 1
+      ? `${label} ${plural} your biggest category this week.`
+      : `${label} made up ${pct}% of your spending this week.`;
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-t-[26px] bg-white px-5 pb-7 pt-2.5 shadow-[0_-12px_40px_rgba(60,90,150,0.25)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <div className="mx-auto mb-3.5 h-1.5 w-10 rounded-full bg-[#e2e5ec]" />
+
+        <div className="flex items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={categoryIcon(slug)} alt="" className="h-7 w-7 shrink-0 object-contain" />
+          <h2 className="text-[20px] text-[#2b2b2b]">{label}</h2>
+        </div>
+
+        <p className="mt-2 text-[26px] leading-none text-[#2b2b2b]">
+          {money(total)} <span className="text-[16px]">this week</span>
+        </p>
+        <p className="mt-1 text-[13px] text-[#8d8d93]">
+          {rows.length} purchase{rows.length === 1 ? "" : "s"}{" "}
+          <span className="mx-0.5">·</span> <span className="text-[#2f63e6]">{pct}%</span> of total spending
+        </p>
+
+        <div className="my-3 border-t border-dashed border-[#e6e8ef]" />
+
+        <ul className="flex flex-col gap-3">
+          {rows.map((e) => (
+            <li key={e.id} className="flex items-center gap-3">
+              <Avatar person={e.person} size={36} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] leading-tight text-[#2b2b2b]">
+                  {NAME[e.person]} <span className="mx-0.5 text-[#c2c2c8]">·</span> {e.note || label}
+                </p>
+                <p className="mt-0.5 text-[11px] text-[#a9a9b0]">{formatWeekdayWhen(e.created_at, now)}</p>
+              </div>
+              <span className="text-[15px] text-[#2b2b2b]">-{money(Number(e.amount))}</span>
+            </li>
+          ))}
+        </ul>
+
+        <div className="my-3 border-t border-dashed border-[#e6e8ef]" />
+
+        <div className="flex items-center gap-2 rounded-[14px] bg-[#eef3fb] px-3 py-2.5">
+          <BulbIcon className="w-5 shrink-0" />
+          <p className="text-[12px] text-[#5a6678]">{insight}</p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onViewAll}
+          className="mt-3.5 w-full text-center text-[14px] text-[#2f63e6]"
+        >
+          View all {label.toLowerCase()} activity →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Full history for one category, reached from the detail sheet's "View all".
+function CategoryActivityScreen({
+  slug,
+  expenses,
+  loading,
+  now,
+  onBack,
+  onHome,
+  onGoals,
+}: {
+  slug: string;
+  expenses: Expense[];
+  loading: boolean;
+  now: Date;
+  onBack: () => void;
+  onHome: () => void;
+  onGoals: () => void;
+}) {
+  const label = CATEGORY_LABEL[slug] ?? slug;
+  const rows = expenses.filter((e) => Number(e.amount) > 0 && expenseSlug(e) === slug);
+  const total = rows.reduce((s, e) => s + Number(e.amount), 0);
+
+  return (
+    <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
+      <div className="flex flex-1 flex-col px-4 pb-24 pt-[max(env(safe-area-inset-top),14px)]">
+        <section className="flex flex-1 flex-col rounded-[28px] bg-[#eaf2fd]/85 px-4 pb-3 pt-3 shadow-[0_12px_36px_rgba(120,150,200,0.22)] backdrop-blur-sm">
+          {/* ---- header ---- */}
+          <div className="relative flex items-center justify-center py-1.5">
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Back"
+              className="absolute left-0 flex h-9 w-9 items-center justify-center rounded-full transition active:scale-95"
+            >
+              <ChevronLeftIcon className="w-5" />
+            </button>
+            <h1 className="flex items-center gap-2 text-[19px] text-[#2b2b2b]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={categoryIcon(slug)} alt="" className="h-6 w-6 object-contain" />
+              {label}
+            </h1>
+          </div>
+
+          <p className="mt-1 text-center text-[12px] text-[#a9a9b0]">
+            {rows.length} purchase{rows.length === 1 ? "" : "s"} · {money(total)} all time
+          </p>
+
+          {/* ---- list ---- */}
+          <div className="mt-2 rounded-[20px] bg-white px-4 pb-1.5 pt-1.5 shadow-[0_6px_18px_rgba(120,150,200,0.16)]">
+            {loading ? null : rows.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={categoryIcon(slug)} alt="" className="h-12 w-12 object-contain opacity-70" />
+                <p className="mt-2 text-[14px] text-[#2b2b2b]">No {label.toLowerCase()} yet</p>
+                <p className="mt-0.5 text-[12px] text-[#a9a9b0]">Spending here will show up on this screen.</p>
+              </div>
+            ) : (
+              <ul>
+                {rows.map((e, i) => {
+                  const { text } = formatAmount(Number(e.amount));
+                  return (
+                    <li
+                      key={e.id}
+                      className={`flex items-center gap-2.5 py-2.5 ${
+                        i !== rows.length - 1 ? "border-b border-[#f0f0f2]" : ""
+                      }`}
+                    >
+                      <Avatar person={e.person} size={32} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[14px] leading-tight text-[#2b2b2b]">
+                          {NAME[e.person]} <span className="mx-1 text-[#c2c2c8]">·</span> {e.note || label}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-[#a9a9b0]">{formatWhen(e.created_at, now)}</p>
+                      </div>
+                      <span className="text-[14px] text-[#2b2b2b]">{text}</span>
+                      <span className="flex w-6 shrink-0 justify-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={categoryIcon(e.category)} alt="" className="h-5 w-5 object-contain" />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <BottomNav tab="analytics" onHome={onHome} onGoals={onGoals} onAnalytics={onBack} />
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  unit,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  className?: string;
+}) {
+  return (
+    <div className={`flex flex-1 flex-col items-center text-center ${className}`}>
+      <span className="text-[11px] text-[#a9a9b0]">{label}</span>
+      <span className="mt-1 text-[26px] leading-none text-[#2b2b2b]">
+        {value}
+        {unit && <span className="ml-1 text-[15px] text-[#2b2b2b]">{unit}</span>}
+      </span>
+    </div>
+  );
+}
+
+function SplitPerson({
+  person,
+  amount,
+  heartColor,
+  align = "left",
+}: {
+  person: Person;
+  amount: number;
+  heartColor: string;
+  align?: "left" | "right";
+}) {
+  return (
+    <div className={`flex flex-col ${align === "right" ? "items-end" : "items-start"}`}>
+      <Avatar person={person} size={40} />
+      <span className="mt-1 flex items-center gap-1 text-[14px] text-[#2b2b2b]">
+        {NAME[person]}
+        <HeartIcon className="w-3" color={heartColor} />
+      </span>
+      <span className="text-[15px] text-[#2b2b2b]">{money(amount)}</span>
     </div>
   );
 }
