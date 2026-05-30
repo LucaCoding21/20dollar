@@ -601,7 +601,10 @@ export default function BankApp() {
     load();
   }
 
-  async function saveEdit(row: Expense, next: { amount: number; note: string; person: Person }) {
+  async function saveEdit(
+    row: Expense,
+    next: { amount: number; note: string; person: Person },
+  ): Promise<boolean> {
     const trimmed = next.note.trim();
     const { error } = await supabase
       .from("expenses")
@@ -614,11 +617,12 @@ export default function BankApp() {
       .eq("id", row.id);
     if (error) {
       setError(error.message);
-      return;
+      return false;
     }
     setError(null);
     setEditing(null);
     load();
+    return true;
   }
 
   async function deleteExpense(row: Expense) {
@@ -635,18 +639,19 @@ export default function BankApp() {
   /* ---- goal operations ---- */
 
   // Move `amount` out of the bank and into the goal (bumps `saved`).
-  async function contributeToGoal(goal: Goal, amount: number) {
+  async function contributeToGoal(goal: Goal, amount: number): Promise<boolean> {
     const { error } = await supabase
       .from("goals")
       .update({ saved: Number(goal.saved) + amount })
       .eq("id", goal.id);
     if (error) {
       setError(error.message);
-      return;
+      return false;
     }
     setError(null);
     setContributing(null);
     loadGoals();
+    return true;
   }
 
   // Make `id` the one featured "current" goal, clearing the flag on the rest.
@@ -670,7 +675,7 @@ export default function BankApp() {
     target: number;
     image_url: string | null;
     makeCurrent: boolean;
-  }) {
+  }): Promise<boolean> {
     const { data, error } = await supabase
       .from("goals")
       .insert({
@@ -686,13 +691,14 @@ export default function BankApp() {
       .single();
     if (error) {
       setError(error.message);
-      return;
+      return false;
     }
     // Clearing the flag on the others is a no-op when this goal isn't current.
     if (data && (next.makeCurrent || goals.length === 0)) await markCurrent(data.id);
     setError(null);
     setNewGoalOpen(false);
     loadGoals();
+    return true;
   }
 
   async function saveGoalEdit(
@@ -704,7 +710,7 @@ export default function BankApp() {
       image_url: string | null;
       makeCurrent: boolean;
     },
-  ) {
+  ): Promise<boolean> {
     const { error } = await supabase
       .from("goals")
       .update({
@@ -716,12 +722,13 @@ export default function BankApp() {
       .eq("id", goal.id);
     if (error) {
       setError(error.message);
-      return;
+      return false;
     }
     if (next.makeCurrent && !goal.is_current) await markCurrent(goal.id);
     setError(null);
     setEditingGoal(null);
     loadGoals();
+    return true;
   }
 
   async function setGoalCurrent(goal: Goal) {
@@ -813,6 +820,7 @@ export default function BankApp() {
         onFilter={setFilter}
         onBack={() => setView("home")}
         onGoals={() => setView("goals")}
+        onAnalytics={() => setView("analytics")}
         onEdit={setEditing}
         onDelete={setPendingDelete}
         editing={editing}
@@ -837,6 +845,7 @@ export default function BankApp() {
           onViewAll={() => setView("allGoals")}
           onContribute={setContributing}
           onNewGoal={() => setNewGoalOpen(true)}
+          onAnalytics={() => setView("analytics")}
         />
         {goalModals}
       </>
@@ -857,6 +866,7 @@ export default function BankApp() {
           onEdit={setEditingGoal}
           onDelete={setPendingDeleteGoal}
           onSetCurrent={setGoalCurrent}
+          onAnalytics={() => setView("analytics")}
         />
         {goalModals}
       </>
@@ -975,14 +985,14 @@ export default function BankApp() {
             </div>
           ) : (
             <ul>
-              {expenses.map((e, i) => {
+              {expenses.slice(0, 5).map((e, i, arr) => {
                 const { text, spent } = formatAmount(Number(e.amount));
                 const label = e.note || (spent ? "Spent" : "Paid back");
                 return (
                   <li
                     key={e.id}
                     className={`flex items-center gap-2.5 py-2 ${
-                      i !== expenses.length - 1 ? "border-b border-[#f0f0f2]" : ""
+                      i !== arr.length - 1 ? "border-b border-[#f0f0f2]" : ""
                     }`}
                   >
                     <Avatar person={e.person} size={32} />
@@ -1067,7 +1077,7 @@ function BottomNav({
   tab: "home" | "goals" | "analytics";
   onHome: () => void;
   onGoals: () => void;
-  onAnalytics?: () => void;
+  onAnalytics: () => void;
 }) {
   const blue = "#2f63e6";
   const dark = "#1f1f1f";
@@ -1136,6 +1146,7 @@ function AllActivityScreen({
   onFilter,
   onBack,
   onGoals,
+  onAnalytics,
   onEdit,
   onDelete,
   editing,
@@ -1153,11 +1164,15 @@ function AllActivityScreen({
   onFilter: (f: "all" | Person) => void;
   onBack: () => void;
   onGoals: () => void;
+  onAnalytics: () => void;
   onEdit: (e: Expense) => void;
   onDelete: (e: Expense) => void;
   editing: Expense | null;
   onCloseEdit: () => void;
-  onSaveEdit: (row: Expense, next: { amount: number; note: string; person: Person }) => void;
+  onSaveEdit: (
+    row: Expense,
+    next: { amount: number; note: string; person: Person },
+  ) => Promise<boolean>;
   pendingDelete: Expense | null;
   onCancelDelete: () => void;
   onConfirmDelete: (e: Expense) => void;
@@ -1274,7 +1289,7 @@ function AllActivityScreen({
         />
       )}
 
-      <BottomNav tab="home" onHome={onBack} onGoals={onGoals} />
+      <BottomNav tab="home" onHome={onBack} onGoals={onGoals} onAnalytics={onAnalytics} />
     </div>
   );
 }
@@ -1286,7 +1301,10 @@ function EditModal({
 }: {
   expense: Expense;
   onClose: () => void;
-  onSave: (row: Expense, next: { amount: number; note: string; person: Person }) => void;
+  onSave: (
+    row: Expense,
+    next: { amount: number; note: string; person: Person },
+  ) => Promise<boolean>;
 }) {
   // Stored amount is positive for a spend, negative for paid-back. The modal
   // edits a friendly positive number plus a "kind" toggle.
@@ -1302,14 +1320,15 @@ function EditModal({
   const value = Number(amount);
   const valid = Number.isFinite(value) && value > 0;
 
-  function commit() {
+  async function commit() {
     if (!valid || busy) return;
     setBusy(true);
-    onSave(expense, {
+    const ok = await onSave(expense, {
       amount: kind === "spent" ? Math.abs(value) : -Math.abs(value),
       note,
       person,
     });
+    if (!ok) setBusy(false); // on success the modal unmounts; on failure, re-enable
   }
 
   return (
@@ -1576,6 +1595,7 @@ function GoalsScreen({
   onViewAll,
   onContribute,
   onNewGoal,
+  onAnalytics,
 }: {
   goals: Goal[];
   loading: boolean;
@@ -1584,6 +1604,7 @@ function GoalsScreen({
   onViewAll: () => void;
   onContribute: (g: Goal) => void;
   onNewGoal: () => void;
+  onAnalytics: () => void;
 }) {
   // The featured goal is the one flagged current; fall back to the newest.
   const current = goals.find((g) => g.is_current) ?? goals[0] ?? null;
@@ -1651,7 +1672,7 @@ function GoalsScreen({
         )}
       </div>
 
-      <BottomNav tab="goals" onHome={onHome} onGoals={() => {}} />
+      <BottomNav tab="goals" onHome={onHome} onGoals={() => {}} onAnalytics={onAnalytics} />
     </div>
   );
 }
@@ -1755,6 +1776,7 @@ function AllGoalsScreen({
   onEdit,
   onDelete,
   onSetCurrent,
+  onAnalytics,
 }: {
   goals: Goal[];
   loading: boolean;
@@ -1766,6 +1788,7 @@ function AllGoalsScreen({
   onEdit: (g: Goal) => void;
   onDelete: (g: Goal) => void;
   onSetCurrent: (g: Goal) => void;
+  onAnalytics: () => void;
 }) {
   return (
     <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
@@ -1821,7 +1844,7 @@ function AllGoalsScreen({
         </section>
       </div>
 
-      <BottomNav tab="goals" onHome={onHome} onGoals={onBack} />
+      <BottomNav tab="goals" onHome={onHome} onGoals={onBack} onAnalytics={onAnalytics} />
     </div>
   );
 }
@@ -1841,7 +1864,7 @@ function ContributeModal({
   goal: Goal;
   available: number;
   onClose: () => void;
-  onConfirm: (g: Goal, amount: number) => void;
+  onConfirm: (g: Goal, amount: number) => Promise<boolean>;
 }) {
   const toGo = Math.max(0, Number(goal.target) - Number(goal.saved));
   const [amount, setAmount] = useState("");
@@ -1851,10 +1874,11 @@ function ContributeModal({
   const valid =
     Number.isFinite(value) && value > 0 && value <= available + 1e-9;
 
-  function commit() {
+  async function commit() {
     if (!valid || busy) return;
     setBusy(true);
-    onConfirm(goal, value);
+    const ok = await onConfirm(goal, value);
+    if (!ok) setBusy(false); // on success the modal unmounts; on failure, re-enable
   }
 
   return (
@@ -1931,7 +1955,7 @@ function GoalFormModal({
     target: number;
     image_url: string | null;
     makeCurrent: boolean;
-  }) => void;
+  }) => Promise<boolean>;
 }) {
   const [title, setTitle] = useState(goal?.title ?? "");
   const [subtitle, setSubtitle] = useState(goal?.subtitle ?? "");
@@ -1973,13 +1997,14 @@ function GoalFormModal({
       setImageUrl(url);
     }
 
-    onSave({
+    const ok = await onSave({
       title: title.trim(),
       subtitle: subtitle.trim(),
       target: targetValue,
       image_url: url,
       makeCurrent,
     });
+    if (!ok) setBusy(false); // on success the modal unmounts; on failure, re-enable
   }
 
   return (
