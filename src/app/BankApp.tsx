@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase, type Expense, type Person } from "@/lib/supabase";
+import { supabase, type Expense, type Goal, type Person } from "@/lib/supabase";
 import { bankBalance, DAILY_ALLOWANCE } from "@/lib/bank";
 
 /* ------------------------------------------------------------------ */
@@ -156,6 +156,31 @@ function formatBalance(balance: number): string {
   return `${neg ? "-" : ""}$${num}`;
 }
 
+// Compact dollars for goals: "$120", "$67.50". Always non-negative here.
+function money(n: number): string {
+  const abs = Math.abs(n);
+  return `$${Number.isInteger(abs) ? String(abs) : abs.toFixed(2)}`;
+}
+
+// Fraction filled (0..1), guarding against a zero / missing target.
+function goalProgress(g: Goal): number {
+  const t = Number(g.target);
+  if (!(t > 0)) return 0;
+  return Math.min(1, Math.max(0, Number(g.saved) / t));
+}
+
+// Upload a goal photo to the public `goals` bucket and return its public URL.
+// Returns null on failure (caller surfaces the error).
+async function uploadGoalImage(file: File): Promise<string | null> {
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("goals")
+    .upload(path, file, { cacheControl: "3600", upsert: false });
+  if (error) return null;
+  return supabase.storage.from("goals").getPublicUrl(path).data.publicUrl;
+}
+
 // "Today · 9:12 AM" / "Yesterday · 6:47 PM" / "May 10 · 8:21 AM" — civil dates
 // compared in Vancouver time so the labels match the allowance roll-over.
 function formatWhen(iso: string, now: Date): string {
@@ -269,11 +294,20 @@ function BarsIcon({ className = "", color = "#1f1f1f" }: { className?: string; c
   );
 }
 
-function StarIcon({ className = "", color = "#1f1f1f" }: { className?: string; color?: string }) {
+function StarIcon({
+  className = "",
+  color = "#1f1f1f",
+  filled = false,
+}: {
+  className?: string;
+  color?: string;
+  filled?: boolean;
+}) {
   return (
     <svg viewBox="0 0 32 30" fill="none" className={className}>
       <path
         d="M16 4l3.3 7.4 8 .8-6 5.4 1.7 7.9L16 22.7 8.9 25.5l1.8-7.9-6-5.4 8-.8L16 4Z"
+        fill={filled ? color : "none"}
         stroke={color}
         strokeWidth="2.4"
         strokeLinejoin="round"
@@ -300,6 +334,14 @@ function ChevronLeftIcon({ className = "", color = "#2b2b2b" }: { className?: st
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <path d="M15 5l-7 7 7 7" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon({ className = "", color = "#c2c2c8" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M9 5l7 7-7 7" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -333,9 +375,101 @@ function TrashIcon({ className = "", color = "#9a9aa0" }: { className?: string; 
   );
 }
 
+function FlagIcon({ className = "", color = "#2b2b2b" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M6 21V4" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+      <path
+        d="M6 4.5h11.5l-2.2 3.4 2.2 3.4H6"
+        stroke={color}
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon({ className = "", color = "#2f63e6" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M12 5v14M5 12h14" stroke={color} strokeWidth="2.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CameraIcon({ className = "", color = "#9a9aa0" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M4 8.5h3l1.4-2h7.2L17 8.5h3c1.1 0 2 .9 2 2v7c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2v-7c0-1.1.9-2 2-2Z"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13.5" r="3.3" stroke={color} strokeWidth="2" />
+    </svg>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Small building blocks                                             */
 /* ------------------------------------------------------------------ */
+
+// A goal's icon IS its uploaded photo (square crop). Falls back to a star tile
+// when a goal has no photo yet.
+function GoalImage({ url, size, className = "" }: { url: string | null; size: number; className?: string }) {
+  if (url) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt=""
+        className={`shrink-0 rounded-[14px] object-cover ${className}`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-[14px] bg-[#eef3fb] ${className}`}
+      style={{ width: size, height: size }}
+    >
+      <StarIcon className="w-1/2" color="#9bb4e6" />
+    </span>
+  );
+}
+
+function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
+  return (
+    <div className={`overflow-hidden rounded-full bg-[#dfe7f4] ${className}`}>
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-[#6790dc] to-[#5181d4] transition-[width]"
+        style={{ width: `${Math.round(value * 100)}%` }}
+      />
+    </div>
+  );
+}
+
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className={`relative h-[26px] w-[46px] shrink-0 rounded-full transition ${
+        on ? "bg-gradient-to-b from-[#6790dc] to-[#5181d4]" : "bg-[#dfe2ea]"
+      }`}
+    >
+      <span
+        className={`absolute top-[3px] h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.2)] transition-[left] ${
+          on ? "left-[23px]" : "left-[3px]"
+        }`}
+      />
+    </button>
+  );
+}
 
 function Avatar({ person, size }: { person: Person; size: number }) {
   return (
@@ -364,15 +498,23 @@ export default function BankApp() {
   const [note, setNote] = useState("");
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // "All activity" screen state.
-  const [view, setView] = useState<"home" | "all">("home");
+  // Which screen is showing. Home tab = home/all; Goals tab = goals/allGoals.
+  const [view, setView] = useState<"home" | "all" | "goals" | "allGoals">("home");
   const [filter, setFilter] = useState<"all" | Person>("all");
   const [editing, setEditing] = useState<Expense | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Expense | null>(null);
+
+  // Goals screen state: which goal is being funded / edited / removed, and
+  // whether the "new goal" sheet is open.
+  const [contributing, setContributing] = useState<Goal | null>(null);
+  const [newGoalOpen, setNewGoalOpen] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+  const [pendingDeleteGoal, setPendingDeleteGoal] = useState<Goal | null>(null);
 
   // Re-render every minute so the balance rolls over at Vancouver midnight.
   const [now, setNow] = useState(() => new Date());
@@ -382,16 +524,30 @@ export default function BankApp() {
   }, []);
 
   const load = useCallback(async () => {
+    const [ex, gl] = await Promise.all([
+      supabase.from("expenses").select("*").order("created_at", { ascending: false }),
+      supabase.from("goals").select("*").order("created_at", { ascending: false }),
+    ]);
+    if (ex.error) setError(ex.error.message);
+    else if (gl.error) setError(gl.error.message);
+    else {
+      setError(null);
+      setExpenses((ex.data ?? []) as Expense[]);
+      setGoals((gl.data ?? []) as Goal[]);
+    }
+    setLoading(false);
+  }, []);
+
+  const loadGoals = useCallback(async () => {
     const { data, error } = await supabase
-      .from("expenses")
+      .from("goals")
       .select("*")
       .order("created_at", { ascending: false });
     if (error) setError(error.message);
     else {
       setError(null);
-      setExpenses((data ?? []) as Expense[]);
+      setGoals((data ?? []) as Goal[]);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -402,7 +558,13 @@ export default function BankApp() {
     () => expenses.reduce((sum, e) => sum + Number(e.amount), 0),
     [expenses],
   );
-  const balance = bankBalance(totalSpent, now);
+  // Money parked in goals is set aside from the bank, so it shrinks the
+  // available balance just like a spend does.
+  const totalSaved = useMemo(
+    () => goals.reduce((sum, g) => sum + Number(g.saved), 0),
+    [goals],
+  );
+  const balance = bankBalance(totalSpent + totalSaved, now);
 
   async function submit() {
     const value = Number(amount);
@@ -458,6 +620,147 @@ export default function BankApp() {
     load();
   }
 
+  /* ---- goal operations ---- */
+
+  // Move `amount` out of the bank and into the goal (bumps `saved`).
+  async function contributeToGoal(goal: Goal, amount: number) {
+    const { error } = await supabase
+      .from("goals")
+      .update({ saved: Number(goal.saved) + amount })
+      .eq("id", goal.id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setError(null);
+    setContributing(null);
+    loadGoals();
+  }
+
+  // Make `id` the one featured "current" goal, clearing the flag on the rest.
+  async function markCurrent(id: string): Promise<boolean> {
+    const cleared = await supabase.from("goals").update({ is_current: false }).neq("id", id);
+    if (cleared.error) {
+      setError(cleared.error.message);
+      return false;
+    }
+    const set = await supabase.from("goals").update({ is_current: true }).eq("id", id);
+    if (set.error) {
+      setError(set.error.message);
+      return false;
+    }
+    return true;
+  }
+
+  async function createGoal(next: {
+    title: string;
+    subtitle: string;
+    target: number;
+    image_url: string | null;
+    makeCurrent: boolean;
+  }) {
+    const { data, error } = await supabase
+      .from("goals")
+      .insert({
+        title: next.title,
+        subtitle: next.subtitle || null,
+        target: next.target,
+        saved: 0,
+        image_url: next.image_url,
+        // The very first goal is current by default.
+        is_current: next.makeCurrent || goals.length === 0,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    // Clearing the flag on the others is a no-op when this goal isn't current.
+    if (data && (next.makeCurrent || goals.length === 0)) await markCurrent(data.id);
+    setError(null);
+    setNewGoalOpen(false);
+    loadGoals();
+  }
+
+  async function saveGoalEdit(
+    goal: Goal,
+    next: {
+      title: string;
+      subtitle: string;
+      target: number;
+      image_url: string | null;
+      makeCurrent: boolean;
+    },
+  ) {
+    const { error } = await supabase
+      .from("goals")
+      .update({
+        title: next.title,
+        subtitle: next.subtitle || null,
+        target: next.target,
+        image_url: next.image_url,
+      })
+      .eq("id", goal.id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    if (next.makeCurrent && !goal.is_current) await markCurrent(goal.id);
+    setError(null);
+    setEditingGoal(null);
+    loadGoals();
+  }
+
+  async function setGoalCurrent(goal: Goal) {
+    if (goal.is_current) return;
+    if (await markCurrent(goal.id)) loadGoals();
+  }
+
+  // Removing a goal returns its parked money to the bank automatically, since
+  // the balance subtracts the sum of every goal's `saved`.
+  async function deleteGoal(goal: Goal) {
+    const { error } = await supabase.from("goals").delete().eq("id", goal.id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setError(null);
+    setPendingDeleteGoal(null);
+    loadGoals();
+  }
+
+  // Shared modal stack for the goals screens (mounted by both goals + allGoals).
+  const goalModals = (
+    <>
+      {contributing && (
+        <ContributeModal
+          goal={contributing}
+          available={balance}
+          onClose={() => setContributing(null)}
+          onConfirm={contributeToGoal}
+        />
+      )}
+      {newGoalOpen && (
+        <GoalFormModal onClose={() => setNewGoalOpen(false)} onSave={createGoal} />
+      )}
+      {editingGoal && (
+        <GoalFormModal
+          goal={editingGoal}
+          onClose={() => setEditingGoal(null)}
+          onSave={(next) => saveGoalEdit(editingGoal, next)}
+        />
+      )}
+      {pendingDeleteGoal && (
+        <ConfirmDeleteGoalModal
+          goal={pendingDeleteGoal}
+          onCancel={() => setPendingDeleteGoal(null)}
+          onConfirm={() => deleteGoal(pendingDeleteGoal)}
+        />
+      )}
+    </>
+  );
+
   if (view === "all") {
     return (
       <AllActivityScreen
@@ -467,6 +770,7 @@ export default function BankApp() {
         filter={filter}
         onFilter={setFilter}
         onBack={() => setView("home")}
+        onGoals={() => setView("goals")}
         onEdit={setEditing}
         onDelete={setPendingDelete}
         editing={editing}
@@ -477,6 +781,43 @@ export default function BankApp() {
         onConfirmDelete={deleteExpense}
         error={error}
       />
+    );
+  }
+
+  if (view === "goals") {
+    return (
+      <>
+        <GoalsScreen
+          goals={goals}
+          loading={loading}
+          error={error}
+          onHome={() => setView("home")}
+          onViewAll={() => setView("allGoals")}
+          onContribute={setContributing}
+          onNewGoal={() => setNewGoalOpen(true)}
+        />
+        {goalModals}
+      </>
+    );
+  }
+
+  if (view === "allGoals") {
+    return (
+      <>
+        <AllGoalsScreen
+          goals={goals}
+          loading={loading}
+          error={error}
+          onBack={() => setView("goals")}
+          onHome={() => setView("home")}
+          onContribute={setContributing}
+          onNewGoal={() => setNewGoalOpen(true)}
+          onEdit={setEditingGoal}
+          onDelete={setPendingDeleteGoal}
+          onSetCurrent={setGoalCurrent}
+        />
+        {goalModals}
+      </>
     );
   }
 
@@ -630,17 +971,7 @@ export default function BankApp() {
         </section>
       </div>
 
-      {/* ---- bottom nav ---- */}
-      <nav className="fixed inset-x-0 bottom-0 z-20">
-        <div className="mx-auto max-w-[420px] px-4 pb-[max(env(safe-area-inset-bottom),8px)] pt-1">
-          <div className="flex items-center justify-around rounded-[22px] bg-white/95 py-2 shadow-[0_-2px_20px_rgba(120,150,200,0.18)] backdrop-blur">
-            <NavItem label="Home" active icon={<HomeIcon className="w-5" color="#2f63e6" />} />
-            <NavItem label="Analytics" icon={<BarsIcon className="w-5" />} />
-            <NavItem label="Goals" icon={<StarIcon className="w-5" />} />
-            <NavItem label="Settings" icon={<GearIcon className="w-5" />} />
-          </div>
-        </div>
-      </nav>
+      <BottomNav tab="home" onHome={() => setView("home")} onGoals={() => setView("goals")} />
     </div>
   );
 }
@@ -661,18 +992,57 @@ function NavItem({
   label,
   icon,
   active = false,
+  onClick,
 }: {
   label: string;
   icon: React.ReactNode;
   active?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <button type="button" className="flex flex-col items-center gap-1">
+    <button type="button" onClick={onClick} className="flex flex-col items-center gap-1">
       {icon}
       <span className={`text-[12px] ${active ? "text-[#2f63e6]" : "text-[#2b2b2b]"}`}>
         {label}
       </span>
     </button>
+  );
+}
+
+// Shared bottom nav. `tab` highlights the active section; Home and Goals route,
+// Analytics and Settings aren't built yet (no-ops).
+function BottomNav({
+  tab,
+  onHome,
+  onGoals,
+}: {
+  tab: "home" | "goals";
+  onHome: () => void;
+  onGoals: () => void;
+}) {
+  const blue = "#2f63e6";
+  const dark = "#1f1f1f";
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20">
+      <div className="mx-auto max-w-[420px] px-4 pb-[max(env(safe-area-inset-bottom),8px)] pt-1">
+        <div className="flex items-center justify-around rounded-[22px] bg-white/95 py-2 shadow-[0_-2px_20px_rgba(120,150,200,0.18)] backdrop-blur">
+          <NavItem
+            label="Home"
+            active={tab === "home"}
+            onClick={onHome}
+            icon={<HomeIcon className="w-5" color={tab === "home" ? blue : dark} />}
+          />
+          <NavItem label="Analytics" icon={<BarsIcon className="w-5" />} />
+          <NavItem
+            label="Goals"
+            active={tab === "goals"}
+            onClick={onGoals}
+            icon={<StarIcon className="w-5" color={tab === "goals" ? blue : dark} />}
+          />
+          <NavItem label="Settings" icon={<GearIcon className="w-5" />} />
+        </div>
+      </div>
+    </nav>
   );
 }
 
@@ -711,6 +1081,7 @@ function AllActivityScreen({
   filter,
   onFilter,
   onBack,
+  onGoals,
   onEdit,
   onDelete,
   editing,
@@ -727,6 +1098,7 @@ function AllActivityScreen({
   filter: "all" | Person;
   onFilter: (f: "all" | Person) => void;
   onBack: () => void;
+  onGoals: () => void;
   onEdit: (e: Expense) => void;
   onDelete: (e: Expense) => void;
   editing: Expense | null;
@@ -848,17 +1220,7 @@ function AllActivityScreen({
         />
       )}
 
-      {/* ---- bottom nav ---- */}
-      <nav className="fixed inset-x-0 bottom-0 z-20">
-        <div className="mx-auto max-w-[420px] px-4 pb-[max(env(safe-area-inset-bottom),8px)] pt-1">
-          <div className="flex items-center justify-around rounded-[22px] bg-white/95 py-2 shadow-[0_-2px_20px_rgba(120,150,200,0.18)] backdrop-blur">
-            <NavItem label="Home" active icon={<HomeIcon className="w-5" color="#2f63e6" />} />
-            <NavItem label="Analytics" icon={<BarsIcon className="w-5" />} />
-            <NavItem label="Goals" icon={<StarIcon className="w-5" />} />
-            <NavItem label="Settings" icon={<GearIcon className="w-5" />} />
-          </div>
-        </div>
-      </nav>
+      <BottomNav tab="home" onHome={onBack} onGoals={onGoals} />
     </div>
   );
 }
@@ -1016,6 +1378,668 @@ function ConfirmDeleteModal({
         <h2 className="text-[16px] text-[#2b2b2b]">Remove transaction?</h2>
         <p className="mt-1 text-[13px] text-[#8d8d93]">
           {NAME[expense.person]} · {label} ({text})
+        </p>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-[14px] bg-[#f1f2f6] py-2.5 text-[15px] text-[#2b2b2b] transition active:scale-[0.99]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 rounded-[14px] bg-[#e4544c] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(212,69,62,0.32)] transition active:scale-[0.99]"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Goals screen                                                      */
+/* ------------------------------------------------------------------ */
+
+// "+ New goal" pill, used in both the goals home and the view-all screen.
+function NewGoalButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1 rounded-full border border-[#cdd9f0] bg-white px-3 py-1.5 text-[13px] text-[#2f63e6] transition active:scale-95"
+    >
+      <PlusIcon className="w-3.5" />
+      New goal
+    </button>
+  );
+}
+
+// A "More goals" card on the goals home: photo · title/amount · short progress
+// bar · chevron. Tapping the card opens the contribute sheet.
+function MoreGoalCard({ goal, onContribute }: { goal: Goal; onContribute: (g: Goal) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onContribute(goal)}
+      className="flex w-full items-center gap-3 rounded-[18px] bg-white px-3.5 py-3 text-left shadow-[0_6px_16px_rgba(120,150,200,0.12)] transition active:scale-[0.99]"
+    >
+      <GoalImage url={goal.image_url} size={44} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[15px] leading-tight text-[#2b2b2b]">{goal.title}</p>
+        <p className="mt-0.5 text-[12px] text-[#a9a9b0]">
+          {money(Number(goal.saved))} <span className="text-[#c2c2c8]">of {money(Number(goal.target))}</span>
+        </p>
+      </div>
+      <ProgressBar value={goalProgress(goal)} className="h-2 w-[34%] shrink-0" />
+      <ChevronRightIcon className="w-4 shrink-0" />
+    </button>
+  );
+}
+
+// One goal row for the view-all screen: photo · title/amount · progress, then
+// the action icons (make-current star, add, edit, remove).
+function GoalRow({
+  goal,
+  onContribute,
+  onEdit,
+  onDelete,
+  onSetCurrent,
+}: {
+  goal: Goal;
+  onContribute: (g: Goal) => void;
+  onEdit: (g: Goal) => void;
+  onDelete: (g: Goal) => void;
+  onSetCurrent: (g: Goal) => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 py-2.5">
+      <GoalImage url={goal.image_url} size={40} />
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5 truncate text-[14px] leading-tight text-[#2b2b2b]">
+          {goal.title}
+          {goal.is_current && <FlagIcon className="w-3 shrink-0" color="#2f63e6" />}
+        </p>
+        <p className="mt-0.5 text-[11px] text-[#a9a9b0]">
+          {money(Number(goal.saved))} of {money(Number(goal.target))}
+        </p>
+        <ProgressBar value={goalProgress(goal)} className="mt-1.5 h-1.5 w-full" />
+      </div>
+      <div className="flex shrink-0 items-center">
+        <button
+          type="button"
+          onClick={() => onSetCurrent(goal)}
+          aria-label="Make current goal"
+          className="flex h-7 w-7 items-center justify-center rounded-full transition active:scale-90"
+        >
+          <StarIcon className="w-[18px]" color={goal.is_current ? "#2f63e6" : "#c4c7cf"} filled={goal.is_current} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onContribute(goal)}
+          aria-label="Add to goal"
+          className="flex h-7 w-7 items-center justify-center rounded-full transition active:scale-90"
+        >
+          <PlusIcon className="w-[18px]" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onEdit(goal)}
+          aria-label="Edit"
+          className="flex h-7 w-7 items-center justify-center rounded-full transition active:scale-90"
+        >
+          <PencilIcon className="w-[18px]" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(goal)}
+          aria-label="Delete"
+          className="flex h-7 w-7 items-center justify-center rounded-full transition active:scale-90"
+        >
+          <TrashIcon className="w-[18px]" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function GoalsHeader({ title }: { title: string }) {
+  return (
+    <div className="flex items-center justify-center py-1.5">
+      <h1 className="text-[22px] text-[#2b2b2b]">{title}</h1>
+    </div>
+  );
+}
+
+function GoalsScreen({
+  goals,
+  loading,
+  error,
+  onHome,
+  onViewAll,
+  onContribute,
+  onNewGoal,
+}: {
+  goals: Goal[];
+  loading: boolean;
+  error: string | null;
+  onHome: () => void;
+  onViewAll: () => void;
+  onContribute: (g: Goal) => void;
+  onNewGoal: () => void;
+}) {
+  // The featured goal is the one flagged current; fall back to the newest.
+  const current = goals.find((g) => g.is_current) ?? goals[0] ?? null;
+  const rest = current ? goals.filter((g) => g.id !== current.id) : [];
+
+  return (
+    <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
+      <div className="flex flex-1 flex-col gap-3 px-4 pb-20 pt-[max(env(safe-area-inset-top),14px)]">
+        <GoalsHeader title="Goals" />
+
+        {error && <p className="text-center text-[12px] text-[#d4453e]">{error}</p>}
+
+        {loading ? null : !current ? (
+          /* ---- empty state ---- */
+          <section className="rounded-[22px] bg-white px-5 py-8 text-center shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+            <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#eef3fb]">
+              <StarIcon className="w-7" color="#9bb4e6" />
+            </span>
+            <p className="text-[15px] text-[#2b2b2b]">No goals yet</p>
+            <p className="mt-1 text-[12px] text-[#a9a9b0]">
+              Add a goal and start saving your leftover budget toward it.
+            </p>
+            <button
+              type="button"
+              onClick={onNewGoal}
+              className="mx-auto mt-4 flex items-center justify-center gap-2 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] px-5 py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99]"
+            >
+              <PlusIcon className="w-4" color="#ffffff" />
+              New goal
+            </button>
+          </section>
+        ) : (
+          <>
+            {/* ---- Current goal ---- */}
+            <CurrentGoalCard goal={current} onContribute={onContribute} />
+
+            {/* ---- More goals ---- */}
+            <section className="rounded-[24px] bg-[#eaf2fd]/85 px-3.5 pb-3 pt-3 shadow-[0_10px_30px_rgba(120,150,200,0.18)] backdrop-blur-sm">
+              <div className="mb-2.5 flex items-center justify-between px-1">
+                <h2 className="text-[16px] text-[#2b2b2b]">More goals</h2>
+                <NewGoalButton onClick={onNewGoal} />
+              </div>
+
+              {rest.length === 0 ? (
+                <div className="rounded-[18px] bg-white px-4 py-5 text-center shadow-[0_6px_16px_rgba(120,150,200,0.12)]">
+                  <p className="text-[12px] text-[#a9a9b0]">No other goals yet — tap “New goal” to add one.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {rest.map((g) => (
+                    <MoreGoalCard key={g.id} goal={g} onContribute={onContribute} />
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={onViewAll}
+                className="mt-2 block w-full pr-1 text-right text-[13px] text-[#2f63e6]"
+              >
+                View all goals →
+              </button>
+            </section>
+          </>
+        )}
+      </div>
+
+      <BottomNav tab="goals" onHome={onHome} onGoals={() => {}} />
+    </div>
+  );
+}
+
+function CurrentGoalCard({
+  goal,
+  onContribute,
+}: {
+  goal: Goal;
+  onContribute: (g: Goal) => void;
+}) {
+  const saved = Number(goal.saved);
+  const target = Number(goal.target);
+  const toGo = Math.max(0, target - saved);
+  const done = saved >= target && target > 0;
+
+  return (
+    <section className="rounded-[28px] bg-white px-4 pb-4 pt-3.5 shadow-[0_10px_30px_rgba(120,150,200,0.2)]">
+      {/* ---- card header ---- */}
+      <div className="flex items-center px-1">
+        <span className="flex items-center gap-2 text-[15px] text-[#2b2b2b]">
+          <FlagIcon className="w-6" color="#2b2b2b" />
+          Current goal
+        </span>
+      </div>
+
+      {/* ---- inner detail card ---- */}
+      <div className="mt-3 rounded-[22px] bg-[#fbfcff] px-4 pb-4 pt-3.5 ring-1 ring-[#eef1f8]">
+        {/* a big vertical photo on the left, details on the right */}
+        <div className="flex items-stretch gap-4">
+          <span
+            className="flex w-[112px] shrink-0 items-center justify-center self-stretch overflow-hidden bg-[#e7f1fd]"
+            style={{ borderRadius: "62% 38% 55% 45% / 52% 46% 54% 48%" }}
+          >
+            {goal.image_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={goal.image_url} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <StarIcon className="w-9" color="#9bb4e6" />
+            )}
+          </span>
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            <p className="truncate text-[26px] leading-tight text-[#2b2b2b]">{goal.title}</p>
+            {goal.subtitle && (
+              <p className="mt-0.5 truncate text-[13px] text-[#8d8d93]">{goal.subtitle}</p>
+            )}
+            <p className="mt-2.5 text-[24px] leading-none text-[#2b2b2b]">
+              {money(saved)} <span className="text-[16px]">of {money(target)}</span>
+            </p>
+            <ProgressBar value={goalProgress(goal)} className="mt-3 h-2.5 w-full" />
+            <p className="mt-2 text-[12px] text-[#a4a7af]">
+              {done ? "Goal reached! 🎉" : `${money(toGo)} to go`}
+            </p>
+          </div>
+        </div>
+
+        {/* ---- contributors + add ---- */}
+        <div className="mt-3.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <PersonPill person="luca" heartColor="#2f63e6" />
+            <PersonPill person="irish" heartColor="#f3a6c9" />
+          </div>
+          <button
+            type="button"
+            onClick={() => onContribute(goal)}
+            disabled={done}
+            className="flex shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-gradient-to-b from-[#6790dc] to-[#5181d4] px-5 py-2.5 text-[14px] text-white transition active:scale-[0.99] disabled:opacity-50"
+          >
+            Add leftover
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Small white pill showing a contributor: avatar · name · heart.
+function PersonPill({ person, heartColor }: { person: Person; heartColor: string }) {
+  return (
+    <span className="flex items-center gap-1.5 rounded-full bg-white px-2 py-1 text-[13px] text-[#2b2b2b] ring-1 ring-[#eceef4]">
+      <Avatar person={person} size={22} />
+      {NAME[person]}
+      <HeartIcon className="w-3" color={heartColor} />
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  All goals screen (mirrors All activity)                           */
+/* ------------------------------------------------------------------ */
+
+function AllGoalsScreen({
+  goals,
+  loading,
+  error,
+  onBack,
+  onHome,
+  onContribute,
+  onNewGoal,
+  onEdit,
+  onDelete,
+  onSetCurrent,
+}: {
+  goals: Goal[];
+  loading: boolean;
+  error: string | null;
+  onBack: () => void;
+  onHome: () => void;
+  onContribute: (g: Goal) => void;
+  onNewGoal: () => void;
+  onEdit: (g: Goal) => void;
+  onDelete: (g: Goal) => void;
+  onSetCurrent: (g: Goal) => void;
+}) {
+  return (
+    <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
+      <div className="flex flex-1 flex-col px-4 pb-24 pt-[max(env(safe-area-inset-top),14px)]">
+        <section className="flex flex-1 flex-col rounded-[28px] bg-[#eaf2fd]/85 px-4 pb-3 pt-3 shadow-[0_12px_36px_rgba(120,150,200,0.22)] backdrop-blur-sm">
+          {/* ---- header ---- */}
+          <div className="relative flex items-center justify-center py-1.5">
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Back"
+              className="absolute left-0 flex h-9 w-9 items-center justify-center rounded-full transition active:scale-95"
+            >
+              <ChevronLeftIcon className="w-5" />
+            </button>
+            <h1 className="text-[19px] text-[#2b2b2b]">All goals</h1>
+            <span className="absolute right-0">
+              <NewGoalButton onClick={onNewGoal} />
+            </span>
+          </div>
+
+          <p className="mt-2.5 text-center text-[12px] text-[#a9a9b0]">
+            Tap the icons to set current, add, edit, or remove
+          </p>
+
+          {error && <p className="mt-2 text-center text-[12px] text-[#d4453e]">{error}</p>}
+
+          {/* ---- list ---- */}
+          <div className="mt-2 rounded-[20px] bg-white px-4 pb-1.5 pt-1.5 shadow-[0_6px_18px_rgba(120,150,200,0.16)]">
+            {loading ? null : goals.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#eef3fb]">
+                  <StarIcon className="w-6" color="#9bb4e6" />
+                </span>
+                <p className="mt-2 text-[14px] text-[#2b2b2b]">No goals yet</p>
+                <p className="mt-0.5 text-[12px] text-[#a9a9b0]">Add a goal to get started!</p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-[#f0f0f2]">
+                {goals.map((g) => (
+                  <GoalRow
+                    key={g.id}
+                    goal={g}
+                    onContribute={onContribute}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onSetCurrent={onSetCurrent}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <BottomNav tab="goals" onHome={onHome} onGoals={onBack} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Goal modals                                                       */
+/* ------------------------------------------------------------------ */
+
+// Move leftover budget out of the bank and into a goal. Capped at what's
+// actually available so the bank can't be pushed negative this way.
+function ContributeModal({
+  goal,
+  available,
+  onClose,
+  onConfirm,
+}: {
+  goal: Goal;
+  available: number;
+  onClose: () => void;
+  onConfirm: (g: Goal, amount: number) => void;
+}) {
+  const toGo = Math.max(0, Number(goal.target) - Number(goal.saved));
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const value = Number(amount);
+  const valid =
+    Number.isFinite(value) && value > 0 && value <= available + 1e-9;
+
+  function commit() {
+    if (!valid || busy) return;
+    setBusy(true);
+    onConfirm(goal, value);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 px-4 pb-6 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[22px] bg-white p-4 shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center gap-3">
+          <GoalImage url={goal.image_url} size={44} />
+          <div className="min-w-0">
+            <h2 className="truncate text-[16px] text-[#2b2b2b]">Add to {goal.title}</h2>
+            <p className="text-[12px] text-[#8d8d93]">
+              {money(Number(goal.saved))} of {money(Number(goal.target))} · {money(toGo)} to go
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+          <span className="text-[18px] text-[#2b2b2b]">$</span>
+          <input
+            inputMode="decimal"
+            autoFocus
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            className="w-full bg-transparent text-[18px] text-[#2b2b2b] outline-none placeholder:text-[#c3c6ce]"
+          />
+        </div>
+        <p className="mt-2 text-[12px] text-[#8d8d93]">
+          {money(Math.max(0, available))} available in the bank
+        </p>
+        {value > 0 && value > available + 1e-9 && (
+          <p className="mt-1 text-[12px] text-[#d4453e]">That&apos;s more than the bank has.</p>
+        )}
+
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-[14px] bg-[#f1f2f6] py-2.5 text-[15px] text-[#2b2b2b] transition active:scale-[0.99]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={commit}
+            disabled={!valid || busy}
+            className="flex-1 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
+          >
+            {busy ? "Adding…" : "Add to goal"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// New / edit goal sheet. The photo becomes the goal's icon (uploaded to the
+// public `goals` bucket). Used for both create and edit.
+function GoalFormModal({
+  goal,
+  onClose,
+  onSave,
+}: {
+  goal?: Goal;
+  onClose: () => void;
+  onSave: (next: {
+    title: string;
+    subtitle: string;
+    target: number;
+    image_url: string | null;
+    makeCurrent: boolean;
+  }) => void;
+}) {
+  const [title, setTitle] = useState(goal?.title ?? "");
+  const [subtitle, setSubtitle] = useState(goal?.subtitle ?? "");
+  const initialTarget = goal ? Number(goal.target) : 0;
+  const [target, setTarget] = useState(
+    goal ? (Number.isInteger(initialTarget) ? String(initialTarget) : initialTarget.toFixed(2)) : "",
+  );
+  const [imageUrl, setImageUrl] = useState<string | null>(goal?.image_url ?? null);
+  const [preview, setPreview] = useState<string | null>(goal?.image_url ?? null);
+  const [file, setFile] = useState<File | null>(null);
+  // New goals default to becoming current; editing keeps the goal's flag.
+  const [makeCurrent, setMakeCurrent] = useState(goal ? goal.is_current : true);
+  const [busy, setBusy] = useState(false);
+  const [imgError, setImgError] = useState<string | null>(null);
+
+  const targetValue = Number(target);
+  const valid = title.trim() !== "" && Number.isFinite(targetValue) && targetValue > 0;
+
+  function pickFile(f: File | null) {
+    if (!f) return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+    setImgError(null);
+  }
+
+  async function commit() {
+    if (!valid || busy) return;
+    setBusy(true);
+    setImgError(null);
+
+    let url = imageUrl;
+    if (file) {
+      url = await uploadGoalImage(file);
+      if (!url) {
+        setImgError("Couldn't upload that photo. Try another one.");
+        setBusy(false);
+        return;
+      }
+      setImageUrl(url);
+    }
+
+    onSave({
+      title: title.trim(),
+      subtitle: subtitle.trim(),
+      target: targetValue,
+      image_url: url,
+      makeCurrent,
+    });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 px-4 pb-6 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[22px] bg-white p-4 shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <h2 className="mb-3 text-center text-[16px] text-[#2b2b2b]">
+          {goal ? "Edit goal" : "New goal"}
+        </h2>
+
+        {/* photo picker */}
+        <label className="mb-3 flex cursor-pointer items-center gap-3">
+          <span className="relative flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-[#eef3fb] ring-1 ring-[#e7e9ef]">
+            {preview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={preview} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <CameraIcon className="w-7" />
+            )}
+          </span>
+          <span className="text-[13px] text-[#2f63e6]">
+            {preview ? "Change photo" : "Add a photo of your goal"}
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        {imgError && <p className="mb-2 text-[12px] text-[#d4453e]">{imgError}</p>}
+
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Goal name (e.g. Date night)"
+          className="mb-2.5 w-full rounded-[14px] bg-white px-3 py-2.5 text-[15px] text-[#2b2b2b] outline-none ring-1 ring-[#e7e9ef] placeholder:text-[#aeb1b9]"
+        />
+        <input
+          value={subtitle}
+          onChange={(e) => setSubtitle(e.target.value)}
+          placeholder="A little detail (optional)"
+          className="mb-2.5 w-full rounded-[14px] bg-white px-3 py-2.5 text-[14px] text-[#2b2b2b] outline-none ring-1 ring-[#e7e9ef] placeholder:text-[#aeb1b9]"
+        />
+        <div className="mb-3 flex items-center gap-1.5 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+          <span className="text-[18px] text-[#2b2b2b]">$</span>
+          <input
+            inputMode="decimal"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder="Target amount"
+            className="w-full bg-transparent text-[16px] text-[#2b2b2b] outline-none placeholder:text-[#c3c6ce]"
+          />
+        </div>
+
+        {/* make current toggle */}
+        <div className="mb-3 flex items-center justify-between rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+          <span className="text-[14px] text-[#2b2b2b]">Make this my current goal</span>
+          <Toggle on={makeCurrent} onChange={setMakeCurrent} />
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-[14px] bg-[#f1f2f6] py-2.5 text-[15px] text-[#2b2b2b] transition active:scale-[0.99]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={commit}
+            disabled={!valid || busy}
+            className="flex-1 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
+          >
+            {busy ? "Saving…" : goal ? "Save" : "Create goal"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDeleteGoalModal({
+  goal,
+  onCancel,
+  onConfirm,
+}: {
+  goal: Goal;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const saved = Number(goal.saved);
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 px-6 backdrop-blur-[2px]"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-[320px] rounded-[22px] bg-white p-5 text-center shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#fdecec]">
+          <TrashIcon className="w-6" color="#d4453e" />
+        </span>
+        <h2 className="text-[16px] text-[#2b2b2b]">Remove goal?</h2>
+        <p className="mt-1 text-[13px] text-[#8d8d93]">
+          “{goal.title}”
+          {saved > 0 ? ` — ${money(saved)} goes back to the bank.` : ""}
         </p>
         <div className="mt-4 flex gap-2">
           <button
