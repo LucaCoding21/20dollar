@@ -12,10 +12,6 @@ export const metadata: Metadata = {
   title: "$20 a Day",
   description: "Our shared daily allowance bank",
   manifest: "/manifest.webmanifest",
-  icons: {
-    icon: "/icon.png",
-    apple: "/apple-icon.png",
-  },
   appleWebApp: {
     capable: true,
     title: "$20 a Day",
