@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   description: "Our shared daily allowance bank",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/icon.svg",
+    icon: "/icon.png",
     apple: "/apple-icon.png",
   },
   appleWebApp: {

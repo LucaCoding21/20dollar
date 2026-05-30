@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase, type Expense, type Person } from "@/lib/supabase";
+import { bankBalance, DAILY_ALLOWANCE } from "@/lib/bank";
 
 /* ------------------------------------------------------------------ */
 /*  Data (matches the reference mockup 1:1)                            */
 /* ------------------------------------------------------------------ */
-
-type Person = "luca" | "irish";
 
 const AVATAR: Record<Person, string> = {
   luca: "/assetsforai(renameme)/luca.png",
@@ -19,22 +19,81 @@ const AVATAR_SCALE: Record<Person, number> = { luca: 1, irish: 1 };
 
 const NAME: Record<Person, string> = { luca: "Luca", irish: "Irish" };
 
-type Txn = {
-  person: Person;
-  label: string;
-  when: string;
-  amount: number; // negative = spent, positive = added back
-  icon: string; // /categories/*.png  OR  "heart"
+const VANCOUVER = "America/Vancouver";
+
+// Hand-drawn category icons live in /public/categories/<slug>.png. We have no
+// dedicated picker yet (not in the reference), so the category is inferred from
+// the note keywords at insert time and persisted on the row.
+const CATEGORY_SLUGS = [
+  "coffee", "food", "groceries", "transport", "fun",
+  "clothes", "gifts", "bills", "health", "shopping",
+] as const;
+
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  coffee: ["coffee", "latte", "espresso", "cafe", "café", "tea", "starbucks"],
+  food: ["food", "snack", "snacks", "lunch", "dinner", "breakfast", "eat", "restaurant", "meal", "pizza", "burger", "sushi"],
+  groceries: ["grocer", "groceries", "market", "supermarket", "safeway"],
+  transport: ["bus", "train", "uber", "lyft", "taxi", "transit", "fare", "gas", "fuel", "skytrain", "parking"],
+  fun: ["movie", "game", "fun", "party", "concert", "netflix", "spotify"],
+  clothes: ["clothes", "clothing", "shirt", "shoes", "jacket", "pants", "dress"],
+  gifts: ["gift", "present", "birthday"],
+  bills: ["bill", "rent", "subscription", "phone", "internet", "hydro"],
+  health: ["health", "doctor", "pharmacy", "medicine", "gym", "dentist"],
+  shopping: ["shop", "shopping", "store", "amazon"],
 };
 
-const RECENT: Txn[] = [
-  { person: "luca", label: "Coffee", when: "Today · 9:12 AM", amount: -6, icon: "/categories/coffee.png" },
-  { person: "irish", label: "Snacks", when: "Yesterday · 6:47 PM", amount: -12, icon: "/categories/food.png" },
-  { person: "irish", label: "Paid back", when: "Yesterday · 2:15 PM", amount: 10, icon: "heart" },
-  { person: "luca", label: "Bus fare", when: "May 10 · 8:21 AM", amount: -3, icon: "/categories/transport.png" },
-];
+function inferCategory(note: string): string | null {
+  const text = note.toLowerCase();
+  for (const slug of CATEGORY_SLUGS) {
+    if (CATEGORY_KEYWORDS[slug].some((kw) => text.includes(kw))) return slug;
+  }
+  return null;
+}
 
-const BALANCE = 184;
+function categoryIcon(slug: string | null): string {
+  return `/categories/${slug && (CATEGORY_SLUGS as readonly string[]).includes(slug) ? slug : "shopping"}.png`;
+}
+
+// Stored `amount` is positive for a spend, negative for money paid back in.
+function formatAmount(amount: number): { text: string; spent: boolean } {
+  const spent = amount > 0;
+  const abs = Math.abs(amount);
+  const num = Number.isInteger(abs) ? String(abs) : abs.toFixed(2);
+  return { text: `${spent ? "-" : "+"}$${num}`, spent };
+}
+
+function formatBalance(balance: number): string {
+  const neg = balance < 0;
+  const abs = Math.abs(balance);
+  const num = Number.isInteger(abs) ? String(abs) : abs.toFixed(2);
+  return `${neg ? "-" : ""}$${num}`;
+}
+
+// "Today · 9:12 AM" / "Yesterday · 6:47 PM" / "May 10 · 8:21 AM" — civil dates
+// compared in Vancouver time so the labels match the allowance roll-over.
+function formatWhen(iso: string, now: Date): string {
+  const d = new Date(iso);
+  const day = (x: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: VANCOUVER,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(x);
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: VANCOUVER,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+
+  const that = day(d);
+  let label: string;
+  if (that === day(now)) label = "Today";
+  else if (that === day(new Date(now.getTime() - 86_400_000))) label = "Yesterday";
+  else label = new Intl.DateTimeFormat("en-US", { timeZone: VANCOUVER, month: "short", day: "numeric" }).format(d);
+
+  return `${label} · ${time}`;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Icons                                                             */
@@ -235,48 +294,112 @@ export default function BankApp() {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
 
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-render every minute so the balance rolls over at Vancouver midnight.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("expenses")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) setError(error.message);
+    else {
+      setError(null);
+      setExpenses((data ?? []) as Expense[]);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const totalSpent = useMemo(
+    () => expenses.reduce((sum, e) => sum + Number(e.amount), 0),
+    [expenses],
+  );
+  const balance = bankBalance(totalSpent, now);
+
+  async function submit() {
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value === 0 || saving) return;
+
+    setSaving(true);
+    const trimmed = note.trim();
+    const { error } = await supabase.from("expenses").insert({
+      person: who,
+      amount: value,
+      note: trimmed || null,
+      category: inferCategory(trimmed),
+    });
+    setSaving(false);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setAmount("");
+    setNote("");
+    load();
+  }
+
   return (
-    <div className="relative mx-auto flex min-h-dvh w-full max-w-[440px] flex-col">
-      <div className="flex flex-1 flex-col gap-3.5 px-4 pb-28 pt-[max(env(safe-area-inset-top),20px)]">
+    <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
+      <div className="flex flex-1 flex-col gap-2.5 px-4 pb-20 pt-[max(env(safe-area-inset-top),14px)]">
         {/* ---- Shared Bank card ---- */}
-        <section className="relative overflow-hidden rounded-[26px] bg-[#e7f1fd] px-6 pt-5 pb-6 shadow-[0_8px_24px_rgba(120,150,200,0.18)]">
-          <CloudIcon className="absolute left-5 top-5 w-9" />
-          <SparkleIcon className="absolute right-5 top-4 w-8" />
-          <p className="text-center text-[19px] text-[#3a3a3a]">Shared Bank</p>
-          <p className="mt-1 text-center text-[68px] leading-none text-black">${BALANCE}</p>
-          <p className="mt-3 text-center text-[13px] text-[#8d8d93]">
-            <span className="text-[#2f63e6]">+ ${20}</span> every midnight (Vancouver time)
+        <section className="relative overflow-hidden rounded-[22px] bg-[#e7f1fd] px-5 pt-3.5 pb-4 shadow-[0_8px_24px_rgba(120,150,200,0.18)]">
+          <CloudIcon className="absolute left-4 top-3.5 w-7" />
+          <SparkleIcon className="absolute right-4 top-3 w-6" />
+          <p className="text-center text-[15px] text-[#3a3a3a]">Shared Bank</p>
+          <p
+            className={`mt-0.5 text-center text-[46px] leading-none ${
+              balance < 0 ? "text-[#d4453e]" : "text-black"
+            }`}
+          >
+            {loading ? "—" : formatBalance(balance)}
           </p>
-          <BankBuildingIcon className="absolute bottom-4 right-5 w-12" />
+          <p className="mt-2 text-center text-[11px] text-[#8d8d93]">
+            <span className="text-[#2f63e6]">+ ${DAILY_ALLOWANCE}</span> every midnight (Vancouver time)
+          </p>
+          <BankBuildingIcon className="absolute bottom-3 right-4 w-9" />
         </section>
 
         {/* ---- person chips ---- */}
-        <div className="flex justify-center gap-5">
+        <div className="flex justify-center gap-3.5">
           <PersonChip person="luca" heartColor="#2f63e6" />
           <PersonChip person="irish" heartColor="#f3a6c9" />
         </div>
 
         {/* ---- Add a transaction ---- */}
-        <section className="relative rounded-[26px] bg-white px-5 pt-5 pb-5 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-[19px] text-[#2b2b2b]">Add a transaction</h2>
-            <PenDoodle className="w-11 opacity-90" />
+        <section className="relative rounded-[22px] bg-white px-4 pt-3.5 pb-4 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[16px] text-[#2b2b2b]">Add a transaction</h2>
+            <PenDoodle className="w-9 opacity-90" />
           </div>
 
-          <div className="mb-3 flex items-stretch gap-2.5">
+          <div className="mb-2.5 flex items-stretch gap-2">
             {/* amount */}
-            <div className="flex flex-1 items-center gap-2 rounded-[16px] bg-white px-4 py-3 ring-1 ring-[#e7e9ef]">
-              <span className="text-[22px] text-[#2b2b2b]">$</span>
+            <div className="flex flex-1 items-center gap-1.5 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+              <span className="text-[18px] text-[#2b2b2b]">$</span>
               <input
                 inputMode="decimal"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
-                className="w-full bg-transparent text-[22px] text-[#2b2b2b] outline-none placeholder:text-[#c3c6ce]"
+                className="w-full bg-transparent text-[18px] text-[#2b2b2b] outline-none placeholder:text-[#c3c6ce]"
               />
             </div>
             {/* person toggle */}
-            <div className="flex items-stretch overflow-hidden rounded-[16px] border border-[#e7e9ef]">
+            <div className="flex items-stretch overflow-hidden rounded-[14px] border border-[#e7e9ef]">
               {(["luca", "irish"] as Person[]).map((p) => {
                 const active = who === p;
                 return (
@@ -284,12 +407,12 @@ export default function BankApp() {
                     key={p}
                     type="button"
                     onClick={() => setWho(p)}
-                    className={`flex items-center gap-1 rounded-[16px] py-1.5 pl-1.5 pr-3 transition ${
+                    className={`flex items-center gap-1 rounded-[14px] py-1.5 pl-1.5 pr-2.5 transition ${
                       active ? "border border-[#a3b8e6] bg-[#dbe3f6]" : "border border-transparent"
                     }`}
                   >
-                    <Avatar person={p} size={30} />
-                    <span className="text-[15px] text-[#2b2b2b]">{NAME[p]}</span>
+                    <Avatar person={p} size={26} />
+                    <span className="text-[14px] text-[#2b2b2b]">{NAME[p]}</span>
                   </button>
                 );
               })}
@@ -297,76 +420,93 @@ export default function BankApp() {
           </div>
 
           {/* note */}
-          <div className="mb-4 flex items-center gap-2.5 rounded-[16px] bg-white px-4 py-3 ring-1 ring-[#e7e9ef]">
-            <ChatIcon className="w-5 shrink-0" />
+          <div className="mb-3 flex items-center gap-2 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+            <ChatIcon className="w-4 shrink-0" />
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="What was it for?"
-              className="w-full bg-transparent text-[15px] text-[#2b2b2b] outline-none placeholder:text-[#aeb1b9]"
+              className="w-full bg-transparent text-[14px] text-[#2b2b2b] outline-none placeholder:text-[#aeb1b9]"
             />
           </div>
 
           {/* submit */}
           <button
             type="button"
-            className="flex w-full items-center justify-center gap-2 rounded-[16px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[17px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99]"
+            onClick={submit}
+            disabled={saving || amount.trim() === ""}
+            className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
           >
-            Add transaction
-            <SpinnerIcon className="w-4" />
+            {saving ? "Adding…" : "Add transaction"}
+            <SpinnerIcon className={`w-4 ${saving ? "animate-spin" : ""}`} />
           </button>
+          {error && (
+            <p className="mt-2.5 text-center text-[12px] text-[#d4453e]">{error}</p>
+          )}
         </section>
 
         {/* ---- Recent activity ---- */}
-        <section className="rounded-[26px] bg-white px-5 pt-4 pb-2 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
-          <div className="mb-1 flex items-center justify-between">
-            <h2 className="text-[19px] text-[#2b2b2b]">Recent activity</h2>
-            <button type="button" className="text-[14px] text-[#2f63e6]">
+        <section className="rounded-[22px] bg-white px-4 pt-3 pb-1.5 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+          <div className="mb-0.5 flex items-center justify-between">
+            <h2 className="text-[16px] text-[#2b2b2b]">Recent activity</h2>
+            <button type="button" className="text-[13px] text-[#2f63e6]">
               View all
             </button>
           </div>
-          <ul>
-            {RECENT.map((t, i) => (
-              <li
-                key={i}
-                className={`flex items-center gap-3 py-3 ${
-                  i !== RECENT.length - 1 ? "border-b border-[#f0f0f2]" : ""
-                }`}
-              >
-                <Avatar person={t.person} size={38} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[16px] leading-tight text-[#2b2b2b]">
-                    {NAME[t.person]} <span className="mx-1 text-[#c2c2c8]">·</span> {t.label}
-                  </p>
-                  <p className="mt-0.5 text-[12px] text-[#a9a9b0]">{t.when}</p>
-                </div>
-                <span
-                  className={`text-[16px] ${t.amount < 0 ? "text-[#2b2b2b]" : "text-[#18953f]"}`}
-                >
-                  {t.amount < 0 ? "-" : "+"}${Math.abs(t.amount)}
-                </span>
-                <span className="flex w-7 shrink-0 justify-center">
-                  {t.icon === "heart" ? (
-                    <HeartIcon className="w-6" />
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={t.icon} alt="" className="h-6 w-6 object-contain" />
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {loading ? null : expenses.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-5">
+              <Avatar person="luca" size={52} />
+              <p className="mt-2 text-[14px] text-[#2b2b2b]">No activity yet</p>
+              <p className="mt-0.5 text-[12px] text-[#a9a9b0]">Add a transaction to get started!</p>
+            </div>
+          ) : (
+            <ul>
+              {expenses.map((e, i) => {
+                const { text, spent } = formatAmount(Number(e.amount));
+                const label = e.note || (spent ? "Spent" : "Paid back");
+                return (
+                  <li
+                    key={e.id}
+                    className={`flex items-center gap-2.5 py-2 ${
+                      i !== expenses.length - 1 ? "border-b border-[#f0f0f2]" : ""
+                    }`}
+                  >
+                    <Avatar person={e.person} size={32} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[14px] leading-tight text-[#2b2b2b]">
+                        {NAME[e.person]} <span className="mx-1 text-[#c2c2c8]">·</span> {label}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-[#a9a9b0]">
+                        {formatWhen(e.created_at, now)}
+                      </p>
+                    </div>
+                    <span className={`text-[14px] ${spent ? "text-[#2b2b2b]" : "text-[#18953f]"}`}>
+                      {text}
+                    </span>
+                    <span className="flex w-6 shrink-0 justify-center">
+                      {spent ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={categoryIcon(e.category)} alt="" className="h-5 w-5 object-contain" />
+                      ) : (
+                        <HeartIcon className="w-5" />
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
       </div>
 
       {/* ---- bottom nav ---- */}
       <nav className="fixed inset-x-0 bottom-0 z-20">
-        <div className="mx-auto max-w-[440px] px-4 pb-[max(env(safe-area-inset-bottom),12px)] pt-1">
-          <div className="flex items-center justify-around rounded-[26px] bg-white/95 py-2.5 shadow-[0_-2px_20px_rgba(120,150,200,0.18)] backdrop-blur">
-            <NavItem label="Home" active icon={<HomeIcon className="w-6" color="#2f63e6" />} />
-            <NavItem label="Analytics" icon={<BarsIcon className="w-6" />} />
-            <NavItem label="Goals" icon={<StarIcon className="w-6" />} />
-            <NavItem label="Settings" icon={<GearIcon className="w-6" />} />
+        <div className="mx-auto max-w-[420px] px-4 pb-[max(env(safe-area-inset-bottom),8px)] pt-1">
+          <div className="flex items-center justify-around rounded-[22px] bg-white/95 py-2 shadow-[0_-2px_20px_rgba(120,150,200,0.18)] backdrop-blur">
+            <NavItem label="Home" active icon={<HomeIcon className="w-5" color="#2f63e6" />} />
+            <NavItem label="Analytics" icon={<BarsIcon className="w-5" />} />
+            <NavItem label="Goals" icon={<StarIcon className="w-5" />} />
+            <NavItem label="Settings" icon={<GearIcon className="w-5" />} />
           </div>
         </div>
       </nav>
@@ -376,11 +516,11 @@ export default function BankApp() {
 
 function PersonChip({ person, heartColor }: { person: Person; heartColor: string }) {
   return (
-    <div className="flex flex-1 max-w-[180px] items-center justify-center gap-2.5 rounded-[30px] bg-white px-3 py-2.5 shadow-[0_6px_18px_rgba(120,150,200,0.14)]">
-      <Avatar person={person} size={62} />
+    <div className="flex flex-1 max-w-[180px] items-center justify-center gap-2 rounded-[24px] bg-white px-3 py-1.5 shadow-[0_6px_18px_rgba(120,150,200,0.14)]">
+      <Avatar person={person} size={44} />
       <div className="flex flex-col items-start">
-        <span className="text-[20px] leading-none text-[#2b2b2b]">{NAME[person]}</span>
-        <HeartIcon className="mt-2 w-5" color={heartColor} />
+        <span className="text-[17px] leading-none text-[#2b2b2b]">{NAME[person]}</span>
+        <HeartIcon className="mt-1.5 w-4" color={heartColor} />
       </div>
     </div>
   );
