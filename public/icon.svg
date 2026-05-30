@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 180 180">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <rect width="180" height="180" fill="url(#g)"/>
+  <text x="90" y="88" font-family="Helvetica, Arial, sans-serif" font-size="58"
+        font-weight="800" fill="#ffffff" text-anchor="middle">$20</text>
+  <text x="90" y="128" font-family="Helvetica, Arial, sans-serif" font-size="22"
+        font-weight="600" fill="#d1fae5" text-anchor="middle" letter-spacing="2">A DAY</text>
+</svg>
