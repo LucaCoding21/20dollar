@@ -1,10 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Darumadrop_One } from "next/font/google";
+import { Darumadrop_One, Comic_Relief } from "next/font/google";
 import "./globals.css";
 
+// Darumadrop One is kept for the big Shared Bank total only.
 const daruma = Darumadrop_One({
   variable: "--font-daruma",
   weight: "400",
+  subsets: ["latin"],
+});
+
+// Comic Relief is the default font for everything else.
+const comic = Comic_Relief({
+  variable: "--font-comic",
+  weight: ["400", "700"],
   subsets: ["latin"],
 });
 
@@ -34,8 +42,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${daruma.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-[#bfdcf5] font-daruma">{children}</body>
+    <html lang="en" className={`${daruma.variable} ${comic.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col bg-[#bfdcf5] font-comic">{children}</body>
     </html>
   );
 }

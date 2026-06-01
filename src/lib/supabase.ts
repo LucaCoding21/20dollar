@@ -16,6 +16,7 @@ export type Expense = {
   amount: number; // dollars spent (positive shrinks the bank)
   note: string | null;
   category: string | null; // category slug, see CATEGORIES in BankApp
+  gif_url: string | null; // optional GIPHY gif attached to the transaction
 };
 
 // A shared savings goal funded out of the bank balance. `saved` is the running

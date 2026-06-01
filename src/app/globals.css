@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @theme inline {
+  --font-comic: var(--font-comic);
   --font-daruma: var(--font-daruma);
 }
 
@@ -12,8 +13,12 @@ body {
 body {
   margin: 0;
   color: #1f1f1f;
-  font-family: var(--font-daruma), system-ui, sans-serif;
+  font-family: var(--font-comic), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+.font-comic {
+  font-family: var(--font-comic), system-ui, sans-serif;
 }
 
 .font-daruma {

@@ -220,25 +220,6 @@ function formatWhen(iso: string, now: Date): string {
 /* ------------------------------------------------------------------ */
 
 
-function PenDoodle({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 60 40" fill="none" className={className}>
-      <path
-        d="M30 8c3-3 6-3 8-1s2 5-1 8L17 35l-7 2 2-7L30 8Z"
-        stroke="#3a3a3a"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path d="M27 11l8 8" stroke="#3a3a3a" strokeWidth="2" strokeLinecap="round" />
-      <path
-        d="M40 34c2-2 4-2 6 0s4 2 6 0"
-        stroke="#3a3a3a"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 function ChatIcon({ className = "" }: { className?: string }) {
   return (
@@ -504,6 +485,9 @@ export default function BankApp() {
   const [who, setWho] = useState<Person>("luca");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  // Optional GIPHY gif attached to the new transaction, plus picker visibility.
+  const [gifUrl, setGifUrl] = useState<string | null>(null);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -520,6 +504,8 @@ export default function BankApp() {
   const [filter, setFilter] = useState<"all" | Person>("all");
   const [editing, setEditing] = useState<Expense | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Expense | null>(null);
+  // A single recent-activity row the user tapped to inspect on the home screen.
+  const [detail, setDetail] = useState<Expense | null>(null);
 
   // Goals screen state: which goal is being funded / edited / removed, and
   // whether the "new goal" sheet is open.
@@ -589,6 +575,7 @@ export default function BankApp() {
       amount: value,
       note: trimmed || null,
       category: inferCategory(trimmed),
+      gif_url: gifUrl,
     });
     setSaving(false);
 
@@ -598,6 +585,7 @@ export default function BankApp() {
     }
     setAmount("");
     setNote("");
+    setGifUrl(null);
     load();
   }
 
@@ -845,6 +833,7 @@ export default function BankApp() {
           onViewAll={() => setView("allGoals")}
           onContribute={setContributing}
           onNewGoal={() => setNewGoalOpen(true)}
+          onEdit={setEditingGoal}
           onAnalytics={() => setView("analytics")}
         />
         {goalModals}
@@ -877,10 +866,10 @@ export default function BankApp() {
     <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
       <div className="flex flex-1 flex-col gap-2.5 px-4 pb-20 pt-[max(env(safe-area-inset-top),14px)]">
         {/* ---- Shared Bank card ---- */}
-        <section className="relative overflow-hidden rounded-[22px] bg-[#e7f1fd] px-5 pt-3.5 pb-4 shadow-[0_8px_24px_rgba(120,150,200,0.18)]">
+        <section className="relative overflow-hidden rounded-[22px] bg-[#e7f1fd] px-5 pt-5 pb-6 shadow-[0_8px_24px_rgba(120,150,200,0.18)]">
           <p className="text-center text-[15px] text-[#3a3a3a]">Shared Bank</p>
           <p
-            className={`mt-0.5 text-center text-[46px] leading-none ${
+            className={`font-daruma mt-1.5 text-center text-[84px] leading-none ${
               balance < 0 ? "text-[#d4453e]" : "text-black"
             }`}
           >
@@ -891,17 +880,10 @@ export default function BankApp() {
           </p>
         </section>
 
-        {/* ---- person chips ---- */}
-        <div className="flex justify-center gap-3.5">
-          <PersonChip person="luca" heartColor="#2f63e6" />
-          <PersonChip person="irish" heartColor="#f3a6c9" />
-        </div>
-
         {/* ---- Add a transaction ---- */}
         <section className="relative rounded-[22px] bg-white px-4 pt-3.5 pb-4 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-center">
             <h2 className="text-[16px] text-[#2b2b2b]">Add a transaction</h2>
-            <PenDoodle className="w-9 opacity-90" />
           </div>
 
           <div className="mb-2.5 flex items-stretch gap-2">
@@ -948,6 +930,31 @@ export default function BankApp() {
             />
           </div>
 
+          {/* gif */}
+          {gifUrl ? (
+            <div className="relative mb-3 overflow-hidden rounded-[14px] ring-1 ring-[#e7e9ef]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={gifUrl} alt="Selected gif" className="max-h-64 w-full object-cover" />
+              <button
+                type="button"
+                onClick={() => setGifUrl(null)}
+                className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-[16px] leading-none text-white backdrop-blur"
+                aria-label="Remove gif"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setGifPickerOpen(true)}
+              className="mb-3 flex w-full items-center justify-center gap-2 rounded-[14px] py-2.5 text-[14px] text-[#2f63e6] ring-1 ring-[#e7e9ef] transition active:scale-[0.99]"
+            >
+              <span className="rounded bg-[#2f63e6] px-1 py-0.5 text-[10px] font-bold leading-none text-white">GIF</span>
+              Add a GIF
+            </button>
+          )}
+
           {/* submit */}
           <button
             type="button"
@@ -955,7 +962,7 @@ export default function BankApp() {
             disabled={saving || amount.trim() === ""}
             className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
           >
-            {saving ? "Adding…" : "Add transaction"}
+            {saving ? "Adding…" : "+ Add transaction"}
           </button>
           {error && (
             <p className="mt-2.5 text-center text-[12px] text-[#d4453e]">{error}</p>
@@ -991,30 +998,48 @@ export default function BankApp() {
                 return (
                   <li
                     key={e.id}
-                    className={`flex items-center gap-2.5 py-2 ${
-                      i !== arr.length - 1 ? "border-b border-[#f0f0f2]" : ""
-                    }`}
+                    className={i !== arr.length - 1 ? "border-b border-[#f0f0f2]" : ""}
                   >
-                    <Avatar person={e.person} size={32} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[14px] leading-tight text-[#2b2b2b]">
-                        {NAME[e.person]} <span className="mx-1 text-[#c2c2c8]">·</span> {label}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-[#a9a9b0]">
-                        {formatWhen(e.created_at, now)}
-                      </p>
-                    </div>
-                    <span className={`text-[14px] ${spent ? "text-[#2b2b2b]" : "text-[#18953f]"}`}>
-                      {text}
-                    </span>
-                    <span className="flex w-6 shrink-0 justify-center">
-                      {spent ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={categoryIcon(e.category)} alt="" className="h-5 w-5 object-contain" />
-                      ) : (
-                        <HeartIcon className="w-5" />
-                      )}
-                    </span>
+                    {e.gif_url && (
+                      <button
+                        type="button"
+                        onClick={() => setDetail(e)}
+                        className="mt-2 block w-full overflow-hidden rounded-[14px]"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={e.gif_url}
+                          alt=""
+                          className="max-h-48 w-full object-cover"
+                        />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setDetail(e)}
+                      className="flex w-full items-center gap-2.5 py-2 text-left transition active:scale-[0.99]"
+                    >
+                      <Avatar person={e.person} size={32} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[14px] leading-tight text-[#2b2b2b]">
+                          {NAME[e.person]} <span className="mx-1 text-[#c2c2c8]">·</span> {label}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-[#a9a9b0]">
+                          {formatWhen(e.created_at, now)}
+                        </p>
+                      </div>
+                      <span className={`text-[14px] ${spent ? "text-[#2b2b2b]" : "text-[#18953f]"}`}>
+                        {text}
+                      </span>
+                      <span className="flex w-6 shrink-0 justify-center">
+                        {spent ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={categoryIcon(e.category)} alt="" className="h-5 w-5 object-contain" />
+                        ) : (
+                          <HeartIcon className="w-5" />
+                        )}
+                      </span>
+                    </button>
                   </li>
                 );
               })}
@@ -1023,23 +1048,159 @@ export default function BankApp() {
         </section>
       </div>
 
+      {detail && (
+        <TransactionDetailModal
+          expense={detail}
+          now={now}
+          onClose={() => setDetail(null)}
+          onEdit={() => {
+            setEditing(detail);
+            setDetail(null);
+          }}
+          onDelete={() => {
+            setPendingDelete(detail);
+            setDetail(null);
+          }}
+        />
+      )}
+      {editing && (
+        <EditModal expense={editing} onClose={() => setEditing(null)} onSave={saveEdit} />
+      )}
+      {pendingDelete && (
+        <ConfirmDeleteModal
+          expense={pendingDelete}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => deleteExpense(pendingDelete)}
+        />
+      )}
+
       <BottomNav
         tab="home"
         onHome={() => setView("home")}
         onGoals={() => setView("goals")}
         onAnalytics={() => setView("analytics")}
       />
+
+      {gifPickerOpen && (
+        <GifPicker
+          onClose={() => setGifPickerOpen(false)}
+          onPick={(url) => {
+            setGifUrl(url);
+            setGifPickerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function PersonChip({ person, heartColor }: { person: Person; heartColor: string }) {
+// A GIPHY-backed gif search sheet. Opens on "trending", searches as you type,
+// and calls onPick with the chosen gif's url (a downsized .gif that plays in
+// an <img>). Needs NEXT_PUBLIC_GIPHY_API_KEY.
+type GiphyItem = { id: string; images: { fixed_width: { url: string } } };
+
+function GifPicker({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (url: string) => void;
+}) {
+  const apiKey = process.env.NEXT_PUBLIC_GIPHY_API_KEY;
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<GiphyItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  // Missing-key is a render-time fact, not effect state.
+  const error = apiKey
+    ? fetchError
+    : "Missing NEXT_PUBLIC_GIPHY_API_KEY — add it to .env.local.";
+
+  useEffect(() => {
+    if (!apiKey) return;
+    const controller = new AbortController();
+    // Debounce typing; empty query shows trending.
+    const t = setTimeout(async () => {
+      setLoading(true);
+      setFetchError(null);
+      const q = query.trim();
+      const base = q
+        ? `https://api.giphy.com/v1/gifs/search?q=${encodeURIComponent(q)}&`
+        : `https://api.giphy.com/v1/gifs/trending?`;
+      try {
+        const res = await fetch(
+          `${base}api_key=${apiKey}&limit=24&rating=g&bundle=fixed_width_downsampled`,
+          { signal: controller.signal },
+        );
+        if (!res.ok) throw new Error(`GIPHY ${res.status}`);
+        const json = await res.json();
+        setResults((json.data ?? []) as GiphyItem[]);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          setFetchError("Couldn't reach GIPHY. Check the API key and your connection.");
+        }
+      } finally {
+        setLoading(false);
+      }
+    }, 350);
+    return () => {
+      controller.abort();
+      clearTimeout(t);
+    };
+  }, [query, apiKey]);
+
   return (
-    <div className="flex flex-1 max-w-[180px] items-center justify-center gap-2 rounded-[24px] bg-white px-3 py-1.5 shadow-[0_6px_18px_rgba(120,150,200,0.14)]">
-      <Avatar person={person} size={44} />
-      <div className="flex flex-col items-start">
-        <span className="text-[17px] leading-none text-[#2b2b2b]">{NAME[person]}</span>
-        <HeartIcon className="mt-1.5 w-4" color={heartColor} />
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 px-4 pb-6 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[80dvh] w-full max-w-[420px] flex-col rounded-[22px] bg-white p-4 shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-[16px] text-[#2b2b2b]">Pick a GIF</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-[#f0f0f2] text-[16px] leading-none text-[#6b6b72]"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search GIPHY…"
+          className="mb-3 w-full rounded-[14px] bg-white px-3 py-2.5 text-[14px] text-[#2b2b2b] outline-none ring-1 ring-[#e7e9ef] placeholder:text-[#aeb1b9]"
+        />
+
+        {error ? (
+          <p className="py-6 text-center text-[13px] text-[#d4453e]">{error}</p>
+        ) : loading && results.length === 0 ? (
+          <p className="py-6 text-center text-[13px] text-[#a9a9b0]">Loading…</p>
+        ) : results.length === 0 ? (
+          <p className="py-6 text-center text-[13px] text-[#a9a9b0]">No gifs found.</p>
+        ) : (
+          <div className="columns-2 gap-2 overflow-y-auto">
+            {results.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => onPick(g.images.fixed_width.url)}
+                className="mb-2 block w-full break-inside-avoid overflow-hidden rounded-[12px] bg-[#f0f0f2] transition active:scale-[0.98]"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={g.images.fixed_width.url} alt="" className="block w-full" />
+              </button>
+            ))}
+          </div>
+        )}
+
+        <p className="mt-3 text-center text-[10px] text-[#c2c2c8]">Powered by GIPHY</p>
       </div>
     </div>
   );
@@ -1425,6 +1586,106 @@ function EditModal({
   );
 }
 
+// Read-only detail sheet for one transaction, opened by tapping a recent
+// activity row on the home screen. Surfaces the full note, category, and time,
+// plus the gif if one was attached, and hands off to edit / remove.
+function TransactionDetailModal({
+  expense,
+  now,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  expense: Expense;
+  now: Date;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { text, spent } = formatAmount(Number(expense.amount));
+  const categoryName = spent
+    ? CATEGORY_LABEL[expense.category ?? ""] ?? "Shopping"
+    : "Paid back";
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 px-4 pb-6 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[22px] bg-white p-4 shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <h2 className="mb-3 text-center text-[16px] text-[#2b2b2b]">Transaction</h2>
+
+        {/* who + amount */}
+        <div className="flex items-center gap-3">
+          <Avatar person={expense.person} size={44} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[15px] leading-tight text-[#2b2b2b]">
+              {NAME[expense.person]}
+            </p>
+            <p className="mt-0.5 text-[12px] text-[#a9a9b0]">{formatWhen(expense.created_at, now)}</p>
+          </div>
+          <span className={`text-[22px] ${spent ? "text-[#2b2b2b]" : "text-[#18953f]"}`}>
+            {text}
+          </span>
+        </div>
+
+        {/* details */}
+        <div className="mt-3 space-y-2 rounded-[14px] bg-[#f7f8fb] px-3.5 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[12px] text-[#a9a9b0]">Note</span>
+            <span className="min-w-0 truncate text-[14px] text-[#2b2b2b]">
+              {expense.note || "—"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[12px] text-[#a9a9b0]">Category</span>
+            <span className="flex items-center gap-1.5 text-[14px] text-[#2b2b2b]">
+              {spent ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={categoryIcon(expense.category)} alt="" className="h-4 w-4 object-contain" />
+              ) : (
+                <HeartIcon className="w-4" />
+              )}
+              {categoryName}
+            </span>
+          </div>
+        </div>
+
+        {expense.gif_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={expense.gif_url}
+            alt=""
+            className="mt-3 max-h-44 w-full rounded-[14px] object-cover"
+          />
+        )}
+
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-[#fdecec] py-2.5 text-[15px] text-[#d4453e] transition active:scale-[0.99]"
+          >
+            <TrashIcon className="w-[18px]" color="#d4453e" />
+            Remove
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99]"
+          >
+            <PencilIcon className="w-[18px]" color="#ffffff" />
+            Edit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmDeleteModal({
   expense,
   onCancel,
@@ -1491,15 +1752,19 @@ function NewGoalButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-// A "More goals" card on the goals home: photo · title/amount · short progress
-// bar · chevron. Tapping the card opens the contribute sheet.
-function MoreGoalCard({ goal, onContribute }: { goal: Goal; onContribute: (g: Goal) => void }) {
+// A "More goals" card on the goals home: photo · title/amount, then two clear
+// actions — "+" to add leftover toward it, and a pencil to edit it.
+function MoreGoalCard({
+  goal,
+  onContribute,
+  onEdit,
+}: {
+  goal: Goal;
+  onContribute: (g: Goal) => void;
+  onEdit: (g: Goal) => void;
+}) {
   return (
-    <button
-      type="button"
-      onClick={() => onContribute(goal)}
-      className="flex w-full items-center gap-3 rounded-[18px] bg-white px-3.5 py-3 text-left shadow-[0_6px_16px_rgba(120,150,200,0.12)] transition active:scale-[0.99]"
-    >
+    <div className="flex w-full items-center gap-3 rounded-[18px] bg-white px-3.5 py-3 shadow-[0_6px_16px_rgba(120,150,200,0.12)]">
       <GoalImage url={goal.image_url} size={44} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[15px] leading-tight text-[#2b2b2b]">{goal.title}</p>
@@ -1507,9 +1772,23 @@ function MoreGoalCard({ goal, onContribute }: { goal: Goal; onContribute: (g: Go
           {money(Number(goal.saved))} <span className="text-[#c2c2c8]">of {money(Number(goal.target))}</span>
         </p>
       </div>
-      <ProgressBar value={goalProgress(goal)} className="h-2 w-[34%] shrink-0" />
-      <ChevronRightIcon className="w-4 shrink-0" />
-    </button>
+      <button
+        type="button"
+        onClick={() => onEdit(goal)}
+        aria-label={`Edit ${goal.title}`}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f3f6fc] transition active:scale-90"
+      >
+        <PencilIcon className="w-[18px]" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onContribute(goal)}
+        aria-label={`Add to ${goal.title}`}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#6790dc] to-[#5181d4] transition active:scale-90"
+      >
+        <PlusIcon className="w-[18px]" color="#ffffff" />
+      </button>
+    </div>
   );
 }
 
@@ -1595,6 +1874,7 @@ function GoalsScreen({
   onViewAll,
   onContribute,
   onNewGoal,
+  onEdit,
   onAnalytics,
 }: {
   goals: Goal[];
@@ -1604,6 +1884,7 @@ function GoalsScreen({
   onViewAll: () => void;
   onContribute: (g: Goal) => void;
   onNewGoal: () => void;
+  onEdit: (g: Goal) => void;
   onAnalytics: () => void;
 }) {
   // The featured goal is the one flagged current; fall back to the newest.
@@ -1650,12 +1931,12 @@ function GoalsScreen({
 
               {rest.length === 0 ? (
                 <div className="rounded-[18px] bg-white px-4 py-5 text-center shadow-[0_6px_16px_rgba(120,150,200,0.12)]">
-                  <p className="text-[12px] text-[#a9a9b0]">No other goals yet — tap “New goal” to add one.</p>
+                  <p className="text-[12px] text-[#a9a9b0]">No other goals yet. Tap “New goal” to add one.</p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
                   {rest.map((g) => (
-                    <MoreGoalCard key={g.id} goal={g} onContribute={onContribute} />
+                    <MoreGoalCard key={g.id} goal={g} onContribute={onContribute} onEdit={onEdit} />
                   ))}
                 </div>
               )}
@@ -1703,10 +1984,7 @@ function CurrentGoalCard({
       <div className="mt-3 rounded-[22px] bg-[#fbfcff] px-4 pb-4 pt-3.5 ring-1 ring-[#eef1f8]">
         {/* a big vertical photo on the left, details on the right */}
         <div className="flex items-stretch gap-4">
-          <span
-            className="flex w-[112px] shrink-0 items-center justify-center self-stretch overflow-hidden bg-[#e7f1fd]"
-            style={{ borderRadius: "62% 38% 55% 45% / 52% 46% 54% 48%" }}
-          >
+          <span className="flex w-[112px] shrink-0 items-center justify-center self-stretch overflow-hidden rounded-[18px] bg-[#e7f1fd]">
             {goal.image_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={goal.image_url} alt="" className="h-full w-full object-cover" />
@@ -1730,34 +2008,20 @@ function CurrentGoalCard({
           </div>
         </div>
 
-        {/* ---- contributors + add ---- */}
-        <div className="mt-3.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <PersonPill person="luca" heartColor="#2f63e6" />
-            <PersonPill person="irish" heartColor="#f3a6c9" />
-          </div>
+        {/* ---- add ---- */}
+        <div className="mt-3.5">
           <button
             type="button"
             onClick={() => onContribute(goal)}
             disabled={done}
-            className="flex shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-gradient-to-b from-[#6790dc] to-[#5181d4] px-5 py-2.5 text-[14px] text-white transition active:scale-[0.99] disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-gradient-to-b from-[#6790dc] to-[#5181d4] px-5 py-2.5 text-[14px] text-white transition active:scale-[0.99] disabled:opacity-50"
           >
+            <PlusIcon className="w-4" color="#ffffff" />
             Add leftover
           </button>
         </div>
       </div>
     </section>
-  );
-}
-
-// Small white pill showing a contributor: avatar · name · heart.
-function PersonPill({ person, heartColor }: { person: Person; heartColor: string }) {
-  return (
-    <span className="flex items-center gap-1.5 rounded-full bg-white px-2 py-1 text-[13px] text-[#2b2b2b] ring-1 ring-[#eceef4]">
-      <Avatar person={person} size={22} />
-      {NAME[person]}
-      <HeartIcon className="w-3" color={heartColor} />
-    </span>
   );
 }
 
@@ -2191,8 +2455,11 @@ function formatWeekdayWhen(iso: string, now: Date): string {
 
 type WeekStats = {
   spent: number;
+  daysElapsed: number; // Mon..today inclusive, 1..7
+  weekBudget: number; // $20 × daysElapsed accrued so far this week
+  left: number; // weekBudget − spent (negative means over)
   avgPerDay: number;
-  underBudget: number;
+  daysUnder: number; // elapsed days that stayed under the $20 allowance
   daily: number[]; // Mon..Sun spend
   byPerson: Record<Person, number>;
   byCategory: { slug: string; amount: number }[];
@@ -2218,13 +2485,15 @@ function weekStats(expenses: Expense[], now: Date): WeekStats {
   }
 
   const spent = daily.reduce((s, v) => s + v, 0);
-  const activeDays = daily.filter((v) => v > 0).length;
-  // Average per active weekday (Mon–Fri) — the headline "Avg / day".
-  const activeWeekdays = daily.slice(0, 5).filter((v) => v > 0).length;
-  const avgPerDay = spent / Math.max(1, activeWeekdays);
-  // "Under budget" = days you came in below your daily pace.
-  const pace = spent / Math.max(1, activeDays);
-  const underBudget = daily.filter((v) => v > 0 && v < pace).length;
+  // Days from this week's Monday through today (inclusive), capped at the full week.
+  const daysElapsed = Math.min(7, Math.max(1, dayNum(vanYMD(now)) - weekStart + 1));
+  // Everything is measured against the real $20/day allowance, not a self-pace.
+  const weekBudget = DAILY_ALLOWANCE * daysElapsed;
+  const left = weekBudget - spent;
+  const avgPerDay = spent / daysElapsed;
+  // Days so far that stayed under the $20 daily allowance (a $0 day counts).
+  let daysUnder = 0;
+  for (let i = 0; i < daysElapsed; i++) if (daily[i] < DAILY_ALLOWANCE) daysUnder++;
 
   const byCategory = [...catMap.entries()]
     .map(([slug, amount]) => ({ slug, amount }))
@@ -2236,7 +2505,7 @@ function weekStats(expenses: Expense[], now: Date): WeekStats {
       );
     });
 
-  return { spent, avgPerDay, underBudget, daily, byPerson, byCategory };
+  return { spent, daysElapsed, weekBudget, left, avgPerDay, daysUnder, daily, byPerson, byCategory };
 }
 
 // Donut split of the bank between the two people. Luca is the blue arc, Irish
@@ -2293,6 +2562,8 @@ function AnalyticsScreen({
   const catMax = Math.max(1, ...stats.byCategory.map((c) => c.amount));
   const top = stats.byCategory.slice(0, 5);
   const maxDaily = Math.max(1, ...stats.daily);
+  const over = stats.left < 0;
+  const budgetPct = Math.min(100, (stats.spent / Math.max(1, stats.weekBudget)) * 100);
 
   return (
     <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
@@ -2303,21 +2574,45 @@ function AnalyticsScreen({
 
         {/* ---- This week ---- */}
         <section className="rounded-[22px] bg-white px-4 pt-3 pb-3.5 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
-          <div className="mb-2.5 flex items-center gap-2">
-            <h2 className="text-[16px] text-[#2b2b2b]">This week</h2>
-            <CalendarIcon className="w-4" color="#9aa0ab" />
+          <div className="mb-2.5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-[16px] font-bold text-[#2b2b2b]">This week</h2>
+              <CalendarIcon className="w-4" color="#9aa0ab" />
+            </div>
+            <span className="rounded-full bg-[#eef3fb] px-2.5 py-[3px] text-[11px] text-[#5e8be8]">
+              Day {stats.daysElapsed} of 7
+            </span>
           </div>
-          <div className="flex items-stretch divide-x divide-[#eef1f8]">
-            <Stat label="Spent" value={loading ? "—" : money(stats.spent)} className="pr-2" />
+
+          {/* spent vs this week's $20/day budget */}
+          <div className="flex items-end justify-between">
+            <span className="text-[26px] leading-none text-[#2b2b2b]">
+              {loading ? "—" : money(stats.spent)}
+              <span className="ml-1 text-[12px] text-[#a9a9b0]">spent</span>
+            </span>
+            {!loading && (
+              <span className={`text-[14px] ${over ? "text-[#ef8f9c]" : "text-[#34b88a]"}`}>
+                {over ? `${money(-stats.left)} over` : `${money(stats.left)} left`}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-[#f0f2f7]">
+            <div
+              className={`h-full rounded-full ${over ? "bg-[#ef8f9c]" : "bg-gradient-to-r from-[#6f9af0] to-[#5a86e6]"}`}
+              style={{ width: `${loading ? 0 : budgetPct}%` }}
+            />
+          </div>
+          {/* supporting stats */}
+          <div className="mt-3 flex items-stretch divide-x divide-[#eef1f8] border-t border-[#eef1f8] pt-3">
             <Stat
               label="Avg / day"
               value={loading ? "—" : `$${stats.avgPerDay.toFixed(2)}`}
-              className="px-2"
+              className="pr-2"
             />
             <Stat
-              label="Under budget"
-              value={loading ? "—" : `${stats.underBudget}`}
-              unit="days"
+              label="Days under $20"
+              value={loading ? "—" : `${stats.daysUnder}`}
+              unit={`/ ${stats.daysElapsed}`}
               className="pl-2"
             />
           </div>
@@ -2326,7 +2621,7 @@ function AnalyticsScreen({
         {/* ---- Spending split ---- */}
         <section className="rounded-[22px] bg-white px-4 pt-3 pb-3.5 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
           <div className="mb-1 flex items-center gap-1.5">
-            <h2 className="text-[16px] text-[#2b2b2b]">Spending split</h2>
+            <h2 className="text-[16px] font-bold text-[#2b2b2b]">Spending split</h2>
             <HeartIcon className="w-3.5" color="#f3a6c9" />
           </div>
           <div className="flex items-center justify-between">
@@ -2347,7 +2642,7 @@ function AnalyticsScreen({
         {/* ---- Where it went ---- */}
         <section className="rounded-[22px] bg-white px-4 pt-3 pb-2 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
           <div className="mb-2 flex items-center gap-2">
-            <h2 className="text-[16px] text-[#2b2b2b]">Where it went</h2>
+            <h2 className="text-[16px] font-bold text-[#2b2b2b]">Where it went</h2>
             <BagIcon className="w-4" color="#9aa0ab" />
           </div>
           {top.length === 0 ? (
@@ -2387,7 +2682,7 @@ function AnalyticsScreen({
         <section className="rounded-[22px] bg-white px-4 pt-3 pb-3 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <h2 className="text-[16px] text-[#2b2b2b]">Daily spend</h2>
+              <h2 className="text-[16px] font-bold text-[#2b2b2b]">Daily spend</h2>
               <BarsIcon className="w-4" color="#9aa0ab" />
             </div>
             <HeartIcon className="w-3.5" color="#2b2b2b" />
