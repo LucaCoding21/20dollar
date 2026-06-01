@@ -17,7 +17,7 @@ const AVATAR: Record<Person, string> = {
 // at the same size with no per-person correction.
 const AVATAR_SCALE: Record<Person, number> = { luca: 1, irish: 1 };
 
-const NAME: Record<Person, string> = { luca: "Luca", irish: "Irish" };
+const NAME: Record<Person, string> = { luca: "Luca", irish: "Claire" };
 
 const VANCOUVER = "America/Vancouver";
 
@@ -513,6 +513,8 @@ export default function BankApp() {
   const [newGoalOpen, setNewGoalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [pendingDeleteGoal, setPendingDeleteGoal] = useState<Goal | null>(null);
+  // A goal the user tapped to inspect (read-only detail sheet).
+  const [goalDetail, setGoalDetail] = useState<Goal | null>(null);
 
   // Re-render every minute so the balance rolls over at Vancouver midnight.
   const [now, setNow] = useState(() => new Date());
@@ -740,6 +742,28 @@ export default function BankApp() {
   // Shared modal stack for the goals screens (mounted by both goals + allGoals).
   const goalModals = (
     <>
+      {goalDetail && (
+        <GoalDetailModal
+          goal={goalDetail}
+          onClose={() => setGoalDetail(null)}
+          onContribute={() => {
+            setContributing(goalDetail);
+            setGoalDetail(null);
+          }}
+          onEdit={() => {
+            setEditingGoal(goalDetail);
+            setGoalDetail(null);
+          }}
+          onDelete={() => {
+            setPendingDeleteGoal(goalDetail);
+            setGoalDetail(null);
+          }}
+          onSetCurrent={() => {
+            setGoalCurrent(goalDetail);
+            setGoalDetail(null);
+          }}
+        />
+      )}
       {contributing && (
         <ContributeModal
           goal={contributing}
@@ -834,6 +858,7 @@ export default function BankApp() {
           onContribute={setContributing}
           onNewGoal={() => setNewGoalOpen(true)}
           onEdit={setEditingGoal}
+          onDetails={setGoalDetail}
           onAnalytics={() => setView("analytics")}
         />
         {goalModals}
@@ -869,8 +894,8 @@ export default function BankApp() {
         <section className="relative overflow-hidden rounded-[22px] bg-[#e7f1fd] px-5 pt-5 pb-6 shadow-[0_8px_24px_rgba(120,150,200,0.18)]">
           <p className="text-center text-[15px] text-[#3a3a3a]">Shared Bank</p>
           <p
-            className={`font-daruma mt-1.5 text-center text-[84px] leading-none ${
-              balance < 0 ? "text-[#d4453e]" : "text-black"
+            className={`font-daruma mt-1.5 text-center text-[68px] leading-none ${
+              loading ? "text-black" : balance < 0 ? "text-[#d4453e]" : "text-[#22a86f]"
             }`}
           >
             {loading ? "—" : formatBalance(balance)}
@@ -886,18 +911,19 @@ export default function BankApp() {
             <h2 className="text-[16px] text-[#2b2b2b]">Add a transaction</h2>
           </div>
 
-          <div className="mb-2.5 flex items-stretch gap-2">
-            {/* amount */}
-            <div className="flex flex-1 items-center gap-1.5 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
-              <span className="text-[18px] text-[#2b2b2b]">$</span>
-              <input
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                className="w-full bg-transparent text-[18px] text-[#2b2b2b] outline-none placeholder:text-[#c3c6ce]"
-              />
-            </div>
+          {/* note — what it was for, entered first */}
+          <div className="mb-2.5 flex items-center gap-2 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+            <ChatIcon className="w-4 shrink-0" />
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="What was it for?"
+              className="w-full bg-transparent text-[14px] text-[#2b2b2b] outline-none placeholder:text-[#aeb1b9]"
+            />
+          </div>
+
+          {/* person toggle + amount */}
+          <div className="mb-3 flex items-stretch gap-2">
             {/* person toggle */}
             <div className="flex items-stretch overflow-hidden rounded-[14px] border border-[#e7e9ef]">
               {(["luca", "irish"] as Person[]).map((p) => {
@@ -917,24 +943,24 @@ export default function BankApp() {
                 );
               })}
             </div>
-          </div>
-
-          {/* note */}
-          <div className="mb-3 flex items-center gap-2 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
-            <ChatIcon className="w-4 shrink-0" />
-            <input
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="What was it for?"
-              className="w-full bg-transparent text-[14px] text-[#2b2b2b] outline-none placeholder:text-[#aeb1b9]"
-            />
+            {/* amount */}
+            <div className="flex flex-1 items-center gap-1.5 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+              <span className="text-[18px] text-[#2b2b2b]">$</span>
+              <input
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-transparent text-[18px] text-[#2b2b2b] outline-none placeholder:text-[#c3c6ce]"
+              />
+            </div>
           </div>
 
           {/* gif */}
           {gifUrl ? (
             <div className="relative mb-3 overflow-hidden rounded-[14px] ring-1 ring-[#e7e9ef]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={gifUrl} alt="Selected gif" className="max-h-64 w-full object-cover" />
+              <img src={gifUrl} alt="Selected gif" decoding="async" className="max-h-64 w-full object-cover" />
               <button
                 type="button"
                 onClick={() => setGifUrl(null)}
@@ -1000,20 +1026,6 @@ export default function BankApp() {
                     key={e.id}
                     className={i !== arr.length - 1 ? "border-b border-[#f0f0f2]" : ""}
                   >
-                    {e.gif_url && (
-                      <button
-                        type="button"
-                        onClick={() => setDetail(e)}
-                        className="mt-2 block w-full overflow-hidden rounded-[14px]"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={e.gif_url}
-                          alt=""
-                          className="max-h-48 w-full object-cover"
-                        />
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => setDetail(e)}
@@ -1034,12 +1046,28 @@ export default function BankApp() {
                       <span className="flex w-6 shrink-0 justify-center">
                         {spent ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={categoryIcon(e.category)} alt="" className="h-5 w-5 object-contain" />
+                          <img src={categoryIcon(e.category)} alt="" loading="lazy" decoding="async" className="h-5 w-5 object-contain" />
                         ) : (
                           <HeartIcon className="w-5" />
                         )}
                       </span>
                     </button>
+                    {e.gif_url && (
+                      <button
+                        type="button"
+                        onClick={() => setDetail(e)}
+                        className="mb-2 block w-full overflow-hidden rounded-[14px]"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={e.gif_url}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="max-h-48 w-full object-cover"
+                        />
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -1095,9 +1123,13 @@ export default function BankApp() {
 }
 
 // A GIPHY-backed gif search sheet. Opens on "trending", searches as you type,
-// and calls onPick with the chosen gif's url (a downsized .gif that plays in
-// an <img>). Needs NEXT_PUBLIC_GIPHY_API_KEY.
-type GiphyItem = { id: string; images: { fixed_width: { url: string } } };
+// and calls onPick with the chosen gif's url. We prefer the animated .webp
+// rendition (≈10× cheaper to decode on mobile than .gif) and fall back to the
+// .gif url when GIPHY doesn't return one. Needs NEXT_PUBLIC_GIPHY_API_KEY.
+type GiphyItem = { id: string; images: { fixed_width: { url: string; webp?: string } } };
+
+// Lightest playable rendition for a GIPHY item.
+const gifSrc = (g: GiphyItem) => g.images.fixed_width.webp || g.images.fixed_width.url;
 
 function GifPicker({
   onClose,
@@ -1190,11 +1222,11 @@ function GifPicker({
               <button
                 key={g.id}
                 type="button"
-                onClick={() => onPick(g.images.fixed_width.url)}
+                onClick={() => onPick(gifSrc(g))}
                 className="mb-2 block w-full break-inside-avoid overflow-hidden rounded-[12px] bg-[#f0f0f2] transition active:scale-[0.98]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={g.images.fixed_width.url} alt="" className="block w-full" />
+                <img src={gifSrc(g)} alt="" loading="lazy" decoding="async" className="block w-full" />
               </button>
             ))}
           </div>
@@ -1370,7 +1402,7 @@ function AllActivityScreen({
             </FilterChip>
             <FilterChip active={filter === "irish"} onClick={() => onFilter("irish")}>
               <Avatar person="irish" size={22} />
-              Irish
+              Claire
             </FilterChip>
           </div>
 
@@ -1659,6 +1691,7 @@ function TransactionDetailModal({
           <img
             src={expense.gif_url}
             alt=""
+            decoding="async"
             className="mt-3 max-h-44 w-full rounded-[14px] object-cover"
           />
         )}
@@ -1753,25 +1786,35 @@ function NewGoalButton({ onClick }: { onClick: () => void }) {
 }
 
 // A "More goals" card on the goals home: photo · title/amount, then two clear
-// actions — "+" to add leftover toward it, and a pencil to edit it.
+// actions — "+" to add leftover toward it, and a pencil to edit it. Tapping the
+// photo/title area opens the read-only detail sheet.
 function MoreGoalCard({
   goal,
   onContribute,
   onEdit,
+  onDetails,
 }: {
   goal: Goal;
   onContribute: (g: Goal) => void;
   onEdit: (g: Goal) => void;
+  onDetails: (g: Goal) => void;
 }) {
   return (
     <div className="flex w-full items-center gap-3 rounded-[18px] bg-white px-3.5 py-3 shadow-[0_6px_16px_rgba(120,150,200,0.12)]">
-      <GoalImage url={goal.image_url} size={44} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[15px] leading-tight text-[#2b2b2b]">{goal.title}</p>
-        <p className="mt-0.5 text-[12px] text-[#a9a9b0]">
-          {money(Number(goal.saved))} <span className="text-[#c2c2c8]">of {money(Number(goal.target))}</span>
-        </p>
-      </div>
+      <button
+        type="button"
+        onClick={() => onDetails(goal)}
+        aria-label={`View ${goal.title}`}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]"
+      >
+        <GoalImage url={goal.image_url} size={44} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] leading-tight text-[#2b2b2b]">{goal.title}</span>
+          <span className="mt-0.5 block text-[12px] text-[#a9a9b0]">
+            {money(Number(goal.saved))} <span className="text-[#c2c2c8]">of {money(Number(goal.target))}</span>
+          </span>
+        </span>
+      </button>
       <button
         type="button"
         onClick={() => onEdit(goal)}
@@ -1788,6 +1831,112 @@ function MoreGoalCard({
       >
         <PlusIcon className="w-[18px]" color="#ffffff" />
       </button>
+    </div>
+  );
+}
+
+// Read-only detail sheet for one goal, opened by tapping a goal card. Shows the
+// photo, progress, and how much is left, then hands off to add / edit / remove.
+function GoalDetailModal({
+  goal,
+  onClose,
+  onContribute,
+  onEdit,
+  onDelete,
+  onSetCurrent,
+}: {
+  goal: Goal;
+  onClose: () => void;
+  onContribute: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSetCurrent: () => void;
+}) {
+  const saved = Number(goal.saved);
+  const target = Number(goal.target);
+  const toGo = Math.max(0, target - saved);
+  const done = saved >= target && target > 0;
+  const pct = Math.round(goalProgress(goal) * 100);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 px-4 pb-6 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[22px] bg-white p-4 shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <h2 className="mb-3 text-center text-[16px] text-[#2b2b2b]">Goal</h2>
+
+        {/* photo + title */}
+        <div className="flex items-center gap-3">
+          <GoalImage url={goal.image_url} size={56} />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 truncate text-[17px] leading-tight text-[#2b2b2b]">
+              {goal.title}
+              {goal.is_current && <FlagIcon className="w-3.5 shrink-0" color="#2f63e6" />}
+            </p>
+            {goal.subtitle && (
+              <p className="mt-0.5 truncate text-[12px] text-[#8d8d93]">{goal.subtitle}</p>
+            )}
+          </div>
+        </div>
+
+        {/* progress */}
+        <div className="mt-3 rounded-[14px] bg-[#f7f8fb] px-3.5 py-3">
+          <p className="text-[20px] leading-none text-[#2b2b2b]">
+            {money(saved)} <span className="text-[14px] text-[#8d8d93]">of {money(target)}</span>
+          </p>
+          <ProgressBar value={goalProgress(goal)} className="mt-2.5 h-2.5 w-full" />
+          <div className="mt-2 flex items-center justify-between text-[12px] text-[#a4a7af]">
+            <span>{pct}% saved</span>
+            <span>{done ? "Goal reached! 🎉" : `${money(toGo)} to go`}</span>
+          </div>
+        </div>
+
+        {!goal.is_current && (
+          <button
+            type="button"
+            onClick={onSetCurrent}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-[14px] bg-[#eef3fb] py-2 text-[13px] text-[#2f63e6] transition active:scale-[0.99]"
+          >
+            <StarIcon className="w-4" color="#2f63e6" />
+            Make this the current goal
+          </button>
+        )}
+
+        {/* add */}
+        <button
+          type="button"
+          onClick={onContribute}
+          disabled={done}
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
+        >
+          <PlusIcon className="w-[18px]" color="#ffffff" />
+          Add to goal
+        </button>
+
+        {/* edit / remove */}
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-[#fdecec] py-2.5 text-[15px] text-[#d4453e] transition active:scale-[0.99]"
+          >
+            <TrashIcon className="w-[18px]" color="#d4453e" />
+            Remove
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-[#f1f2f6] py-2.5 text-[15px] text-[#2b2b2b] transition active:scale-[0.99]"
+          >
+            <PencilIcon className="w-[18px]" color="#2b2b2b" />
+            Edit
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1875,6 +2024,7 @@ function GoalsScreen({
   onContribute,
   onNewGoal,
   onEdit,
+  onDetails,
   onAnalytics,
 }: {
   goals: Goal[];
@@ -1885,6 +2035,7 @@ function GoalsScreen({
   onContribute: (g: Goal) => void;
   onNewGoal: () => void;
   onEdit: (g: Goal) => void;
+  onDetails: (g: Goal) => void;
   onAnalytics: () => void;
 }) {
   // The featured goal is the one flagged current; fall back to the newest.
@@ -1936,7 +2087,13 @@ function GoalsScreen({
               ) : (
                 <div className="flex flex-col gap-2">
                   {rest.map((g) => (
-                    <MoreGoalCard key={g.id} goal={g} onContribute={onContribute} onEdit={onEdit} />
+                    <MoreGoalCard
+                      key={g.id}
+                      goal={g}
+                      onContribute={onContribute}
+                      onEdit={onEdit}
+                      onDetails={onDetails}
+                    />
                   ))}
                 </div>
               )}
@@ -2530,7 +2687,7 @@ function SplitDonut({ luca, irish }: { luca: number; irish: number }) {
           strokeLinecap="round"
         />
       </g>
-      <text x="70" y="66" textAnchor="middle" className="fill-[#2b2b2b]" style={{ fontSize: 26 }}>
+      <text x="70" y="65" textAnchor="middle" className="fill-[#2b2b2b]" style={{ fontSize: 20 }}>
         {money(total)}
       </text>
       <text x="70" y="84" textAnchor="middle" className="fill-[#a9a9b0]" style={{ fontSize: 12 }}>
@@ -2754,6 +2911,66 @@ function BulbIcon({ className = "", color = "#6b7686" }: { className?: string; c
   );
 }
 
+// Sassy, category-flavoured one-liners for the insight chip. `{pct}` is filled
+// with the category's share of the week. Multiple variants per category; we
+// pick one deterministically below so it stays put across re-renders.
+const SASSY_INSIGHTS: Record<string, string[]> = {
+  coffee: [
+    "The coffee machine at home is right there, you know. ☕",
+    "Another $7 latte? Bold of you.",
+  ],
+  food: [
+    "{pct}% on snacks. We're calling it groceries now? 🧍",
+    "Ordering food again. Your kitchen is filing a complaint.",
+  ],
+  groceries: [
+    "Groceries. Look at you being a functional adult. 👏",
+    "Actually responsible spending? Who are you.",
+  ],
+  transport: [
+    "{pct}% just to be driven around. The legs work. 🚌",
+    "All those bus taps really do add up, huh.",
+  ],
+  fun: [
+    "And that's why we're not going to Japan. 🗾",
+    "{pct}% on fun. The vacation fund is crying.",
+  ],
+  clothes: [
+    "Another outfit? The closet is full and you know it. 🧥",
+    "{pct}% on clothes and still 'nothing to wear.'",
+  ],
+  gifts: [
+    "{pct}% on gifts. Generous of you — where's mine? 🎁",
+    "Spoiling someone, I see. Hope it's worth it.",
+  ],
+  bills: [
+    "Bills. The responsible kind of broke. 😮‍💨",
+    "{pct}% on bills. Adulting isn't a personality, but okay.",
+  ],
+  health: [
+    "Health spending? Okay, that's the good kind. 💪",
+    "Taking care of yourself. We'll allow it.",
+  ],
+  shopping: [
+    "Do you really need this? Be honest. 🛍️",
+    "{pct}% on shopping. The cart was full again, wasn't it.",
+  ],
+};
+
+// Generic sass for the top category and the fallback line.
+const SASSY_TOP = "{label} is the main villain of your wallet this week. 👀";
+const SASSY_FALLBACK = ["Do you really need this? Be honest.", "{label} is quietly eating the budget."];
+
+// Build the insight string for a category. rank 1 gets the "biggest" jab;
+// otherwise a category-specific quip (or a generic one). Variant is chosen from
+// the data so it's stable per render rather than random.
+function sassyInsight(slug: string, label: string, pct: number, rank: number, seed: number): string {
+  const fill = (s: string) => s.replace("{pct}", String(pct)).replace("{label}", label);
+  if (rank === 1) return fill(SASSY_TOP);
+  const variants = SASSY_INSIGHTS[slug] ?? SASSY_FALLBACK;
+  return fill(variants[seed % variants.length]);
+}
+
 // Bottom sheet opened from a "Where it went" row: this week's spend in the
 // category, who spent it, and a quick insight + link to the full history.
 function CategoryDetailSheet({
@@ -2778,11 +2995,7 @@ function CategoryDetailSheet({
   const total = rows.reduce((s, e) => s + Number(e.amount), 0);
   const pct = stats.spent > 0 ? Math.round((total / stats.spent) * 100) : 0;
   const rank = stats.byCategory.findIndex((c) => c.slug === slug) + 1;
-  const plural = label.endsWith("s") ? "were" : "was";
-  const insight =
-    rank === 1
-      ? `${label} ${plural} your biggest category this week.`
-      : `${label} made up ${pct}% of your spending this week.`;
+  const insight = sassyInsight(slug, label, pct, rank, rows.length + pct);
 
   return (
     <div
@@ -2922,7 +3135,7 @@ function CategoryActivityScreen({
                       <span className="text-[14px] text-[#2b2b2b]">{text}</span>
                       <span className="flex w-6 shrink-0 justify-center">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={categoryIcon(e.category)} alt="" className="h-5 w-5 object-contain" />
+                        <img src={categoryIcon(e.category)} alt="" loading="lazy" decoding="async" className="h-5 w-5 object-contain" />
                       </span>
                     </li>
                   );

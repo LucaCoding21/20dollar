@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Darumadrop_One, Comic_Relief } from "next/font/google";
 import "./globals.css";
+import ServiceWorkerRegister from "./sw-register";
 
 // Darumadrop One is kept for the big Shared Bank total only.
 const daruma = Darumadrop_One({
@@ -43,7 +44,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${daruma.variable} ${comic.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-[#bfdcf5] font-comic">{children}</body>
+      <body className="min-h-full flex flex-col bg-[#bfdcf5] font-comic">
+        {children}
+        <ServiceWorkerRegister />
+      </body>
     </html>
   );
 }

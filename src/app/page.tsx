@@ -8,7 +8,7 @@ export default function Home() {
       <div
         aria-hidden
         className="fixed inset-0 -z-10 bg-cover bg-center"
-        style={{ backgroundImage: "url('/clouds.jpg')" }}
+        style={{ backgroundImage: "url('/clouds.webp')" }}
       />
       <BankApp />
     </main>
