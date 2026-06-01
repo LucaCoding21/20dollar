@@ -1,44 +1,29 @@
--- $20 a Day — shared allowance bank. No auth: the anon role can read, insert,
--- update and delete on both tables. RLS is on (required for any table reachable
--- by the Data API) with permissive policies, since this is a private two-person
--- gimmick. This is the full from-scratch setup; for an existing project see
--- supabase-migrate-goals-and-gifs.sql.
+-- Migration: bring Supabase in line with Irish's changes (commit 4d6ea1b).
+-- Adds: expenses.gif_url, expenses UPDATE/DELETE access, the whole `goals`
+-- table, and a public `goals` storage bucket for goal photos.
+-- Safe to re-run: every statement is idempotent.
+-- Run in Supabase dashboard -> SQL Editor -> New query -> paste -> Run.
 
 ------------------------------------------------------------------------
--- expenses: each transaction (spend is positive, refund is negative)
+-- 1. expenses: new gif_url column + edit/delete access
 ------------------------------------------------------------------------
 
-create table if not exists public.expenses (
-  id         uuid        primary key default gen_random_uuid(),
-  created_at timestamptz not null    default now(),
-  person     text        not null    check (person in ('luca', 'irish')),
-  amount     numeric     not null,   -- dollars spent; negative adds money back
-  note       text,
-  category   text,                   -- category slug, e.g. 'food', 'transport'
-  gif_url    text                    -- optional GIPHY gif attached to the txn
-);
+alter table public.expenses add column if not exists gif_url text;
 
-alter table public.expenses enable row level security;
+-- The app now edits and deletes transactions, not just read/insert.
+grant update, delete on public.expenses to anon;
 
--- SQL-created tables aren't auto-exposed to the Data API; grant the anon role.
-grant select, insert, update, delete on public.expenses to anon;
-
-drop policy if exists "anon can read expenses"   on public.expenses;
-drop policy if exists "anon can insert expenses" on public.expenses;
 drop policy if exists "anon can update expenses" on public.expenses;
 drop policy if exists "anon can delete expenses" on public.expenses;
 
-create policy "anon can read expenses"
-  on public.expenses for select to anon using (true);
-create policy "anon can insert expenses"
-  on public.expenses for insert to anon with check (true);
 create policy "anon can update expenses"
   on public.expenses for update to anon using (true) with check (true);
+
 create policy "anon can delete expenses"
   on public.expenses for delete to anon using (true);
 
 ------------------------------------------------------------------------
--- goals: shared savings goals funded out of the bank balance
+-- 2. goals: shared savings goals funded out of the bank balance
 ------------------------------------------------------------------------
 
 create table if not exists public.goals (
@@ -54,6 +39,7 @@ create table if not exists public.goals (
 
 alter table public.goals enable row level security;
 
+-- SQL-created tables aren't auto-exposed to the Data API; grant the anon role.
 grant select, insert, update, delete on public.goals to anon;
 
 drop policy if exists "anon can read goals"   on public.goals;
@@ -71,7 +57,7 @@ create policy "anon can delete goals"
   on public.goals for delete to anon using (true);
 
 ------------------------------------------------------------------------
--- storage: public `goals` bucket for uploaded goal photos
+-- 3. storage: public `goals` bucket for uploaded goal photos
 ------------------------------------------------------------------------
 
 insert into storage.buckets (id, name, public)
@@ -84,8 +70,13 @@ drop policy if exists "anon can upload goal images" on storage.objects;
 create policy "anon can read goal images"
   on storage.objects for select to anon
   using (bucket_id = 'goals');
+
 create policy "anon can upload goal images"
   on storage.objects for insert to anon
   with check (bucket_id = 'goals');
+
+------------------------------------------------------------------------
+-- 4. tell Supabase's API layer to pick up the schema changes immediately
+------------------------------------------------------------------------
 
 notify pgrst, 'reload schema';

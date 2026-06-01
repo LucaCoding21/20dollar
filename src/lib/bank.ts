@@ -5,8 +5,8 @@
 
 export const DAILY_ALLOWANCE = 20;
 
-// Launch day, as a civil date in America/Vancouver. Today = 2026-05-30.
-const LAUNCH = { year: 2026, month: 5, day: 30 };
+// Launch day, as a civil date in America/Vancouver. Fresh start = 2026-06-01.
+const LAUNCH = { year: 2026, month: 6, day: 1 };
 
 const VANCOUVER = "America/Vancouver";
 
