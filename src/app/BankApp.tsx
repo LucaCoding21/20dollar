@@ -501,6 +501,12 @@ export default function BankApp() {
   >("home");
   // The category whose full history is showing on the "category" screen.
   const [categorySlug, setCategorySlug] = useState<string | null>(null);
+
+  // Switching "pages" is just state here (no router), so the scroll position
+  // carries over. Jump back to the top whenever the screen changes.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
+  }, [view, categorySlug]);
   const [filter, setFilter] = useState<"all" | Person>("all");
   const [editing, setEditing] = useState<Expense | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Expense | null>(null);
