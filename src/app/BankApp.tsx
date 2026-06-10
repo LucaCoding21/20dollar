@@ -529,6 +529,34 @@ export default function BankApp() {
     return () => clearInterval(t);
   }, []);
 
+  // Deep-link entry: opening the app as `?amount=12.50&who=claire` (e.g. from
+  // an iOS Shortcut / Back Tap) prefills the new-expense amount, preselects the
+  // person, and drops you on the home screen ready to add a note and save. We
+  // strip the params afterwards so a manual refresh starts clean.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("amount") && !params.has("who")) return;
+
+    const rawAmount = params.get("amount");
+    if (rawAmount != null) {
+      const cleaned = rawAmount.trim();
+      if (cleaned && Number.isFinite(Number(cleaned))) {
+        setAmount(cleaned);
+        setView("home");
+      }
+    }
+
+    // "Claire" is stored as the person `irish`, so accept either spelling.
+    const rawWho = params.get("who")?.trim().toLowerCase();
+    if (rawWho === "luca") setWho("luca");
+    else if (rawWho === "irish" || rawWho === "claire") setWho("irish");
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("amount");
+    url.searchParams.delete("who");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, []);
+
   const load = useCallback(async () => {
     const [ex, gl] = await Promise.all([
       supabase.from("expenses").select("*").order("created_at", { ascending: false }),
