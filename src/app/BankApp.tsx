@@ -521,6 +521,49 @@ function ProgressBar({ value, className = "" }: { value: number; className?: str
   );
 }
 
+// A short celebratory confetti rain. Pure CSS keyframes (see globals.css), no
+// dependency. The overlay is decorative — pointer-events-none, sits above the
+// modals — and the caller unmounts it after a beat. Honors reduced-motion.
+const CONFETTI_COLORS = [
+  "#6790dc", "#5181d4", "#5e8be8", "#f4abce", "#f3a6c9", "#d98bbd", "#22a86f", "#ffd166",
+];
+function Confetti({ count = 90, seed = 1 }: { count?: number; seed?: number }) {
+  // Deterministic per-piece pseudo-randomness (Math.sin hash) — pure, so it's
+  // safe to compute during render, and varied enough to look scattered. `seed`
+  // (bumped per burst) keeps successive bursts from looking identical.
+  const pieces = useMemo(() => {
+    const h = (i: number, salt: number) => {
+      const x = Math.sin((i + 1) * salt + seed * 2.399) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    return Array.from({ length: count }, (_, i) => ({
+      left: h(i, 12.9898) * 100,
+      size: 6 + h(i, 78.233) * 7,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      delay: h(i, 39.346) * 0.5,
+      duration: 2.4 + h(i, 11.135) * 1.8,
+      drift: `${Math.round((h(i, 95.21) - 0.5) * 140)}px`,
+      round: i % 2 === 0,
+    }));
+  }, [count, seed]);
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[60] overflow-hidden" aria-hidden>
+      {pieces.map((p, i) => {
+        const style = {
+          left: `${p.left}%`,
+          width: p.size,
+          height: p.size,
+          backgroundColor: p.color,
+          borderRadius: p.round ? "9999px" : "2px",
+          "--confetti-drift": p.drift,
+          animation: `confetti-fall ${p.duration}s linear ${p.delay}s forwards`,
+        } as React.CSSProperties;
+        return <span key={i} className="confetti-piece absolute top-0 block" style={style} />;
+      })}
+    </div>
+  );
+}
+
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -613,6 +656,14 @@ export default function BankApp() {
   const [editingReward, setEditingReward] = useState<Reward | null>(null);
   const [rewardDetail, setRewardDetail] = useState<Reward | null>(null);
   const [pendingDeleteReward, setPendingDeleteReward] = useState<Reward | null>(null);
+  // Confetti celebration: bumped key forces a fresh burst even on rapid re-fire.
+  const [celebrate, setCelebrate] = useState(false);
+  const [celebrateKey, setCelebrateKey] = useState(0);
+  function triggerCelebrate() {
+    setCelebrateKey((k) => k + 1);
+    setCelebrate(true);
+    window.setTimeout(() => setCelebrate(false), 4200);
+  }
 
   // Re-render every minute so the balance rolls over at Vancouver midnight.
   const [now, setNow] = useState(() => new Date());
@@ -1061,11 +1112,17 @@ export default function BankApp() {
           onClose={() => setRewardDetail(null)}
           onToggleDone={async (done) => {
             const ok = await setRewardDone(rewardDetail, done);
-            if (ok) setRewardDetail((r) => (r ? { ...r, done_at: done ? new Date().toISOString() : null, claimed_at: done ? r.claimed_at : null } : r));
+            if (ok) {
+              setRewardDetail((r) => (r ? { ...r, done_at: done ? new Date().toISOString() : null, claimed_at: done ? r.claimed_at : null } : r));
+              if (done) triggerCelebrate();
+            }
           }}
           onToggleClaim={async (claimed) => {
             const ok = await setRewardClaimed(rewardDetail, claimed);
-            if (ok) setRewardDetail((r) => (r ? { ...r, claimed_at: claimed ? new Date().toISOString() : null } : r));
+            if (ok) {
+              setRewardDetail((r) => (r ? { ...r, claimed_at: claimed ? new Date().toISOString() : null } : r));
+              if (claimed) triggerCelebrate();
+            }
           }}
           onEdit={() => {
             setEditingReward(rewardDetail);
@@ -1212,6 +1269,7 @@ export default function BankApp() {
           onDetails={setRewardDetail}
         />
         {rewardModals}
+        {celebrate && <Confetti key={celebrateKey} seed={celebrateKey} />}
       </>
     );
   }

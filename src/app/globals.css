@@ -25,6 +25,28 @@ body {
   font-family: var(--font-daruma), system-ui, sans-serif;
 }
 
+/* confetti rain — one piece falls, sways, and spins, then fades at the end */
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-12vh) translateX(0) rotate(0deg);
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(108vh) translateX(var(--confetti-drift, 0)) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti-piece {
+    animation: none !important;
+    display: none;
+  }
+}
+
 /* hide number-input spinners */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
