@@ -2298,10 +2298,10 @@ function MoreGoalCard({
       <button
         type="button"
         onClick={() => onContribute(goal)}
-        aria-label={`Add to ${goal.title}`}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#6790dc] to-[#5181d4] transition active:scale-90"
+        aria-label={`Add money to ${goal.title}`}
+        className="shrink-0 whitespace-nowrap rounded-full bg-[#e3edfc] px-3.5 py-2 text-[12px] text-[#2f63e6] transition active:scale-95"
       >
-        <PlusIcon className="w-[18px]" color="#ffffff" />
+        Add money
       </button>
     </div>
   );
@@ -2551,7 +2551,13 @@ function GoalsScreen({
             <section className="rounded-[24px] bg-[#eaf2fd]/85 px-3.5 pb-3 pt-3 shadow-[0_10px_30px_rgba(120,150,200,0.18)] backdrop-blur-sm">
               <div className="mb-2.5 flex items-center justify-between px-1">
                 <h2 className="text-[16px] text-[#2b2b2b]">More goals</h2>
-                <NewGoalButton onClick={onNewGoal} />
+                <button
+                  type="button"
+                  onClick={onViewAll}
+                  className="text-[13px] text-[#2f63e6] transition active:scale-95"
+                >
+                  View all goals →
+                </button>
               </div>
 
               {rest.length === 0 ? (
@@ -2574,10 +2580,11 @@ function GoalsScreen({
 
               <button
                 type="button"
-                onClick={onViewAll}
-                className="mt-2 block w-full pr-1 text-right text-[13px] text-[#2f63e6]"
+                onClick={onNewGoal}
+                className="mt-3 flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-gradient-to-b from-[#6790dc] to-[#5181d4] px-5 py-2.5 text-[14px] text-white transition active:scale-[0.99]"
               >
-                View all goals →
+                <PlusIcon className="w-4" color="#ffffff" />
+                New goal
               </button>
             </section>
           </>
