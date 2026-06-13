@@ -108,7 +108,37 @@ create policy "anon can delete rewards"
   on public.rewards for delete to anon using (true);
 
 ------------------------------------------------------------------------
--- storage: public `goals` bucket for uploaded goal + reward photos
+-- food_items: shared S/A/B/C/D tier list of foods (the Food Tiers app)
+------------------------------------------------------------------------
+
+create table if not exists public.food_items (
+  id         uuid        primary key default gen_random_uuid(),
+  created_at timestamptz not null    default now(),
+  name       text        not null,
+  image_url  text,                                  -- optional photo (goals bucket)
+  tier       text        check (tier is null or tier in ('S', 'A', 'B', 'C', 'D'))
+);
+
+alter table public.food_items enable row level security;
+
+grant select, insert, update, delete on public.food_items to anon;
+
+drop policy if exists "anon can read food_items"   on public.food_items;
+drop policy if exists "anon can insert food_items" on public.food_items;
+drop policy if exists "anon can update food_items" on public.food_items;
+drop policy if exists "anon can delete food_items" on public.food_items;
+
+create policy "anon can read food_items"
+  on public.food_items for select to anon using (true);
+create policy "anon can insert food_items"
+  on public.food_items for insert to anon with check (true);
+create policy "anon can update food_items"
+  on public.food_items for update to anon using (true) with check (true);
+create policy "anon can delete food_items"
+  on public.food_items for delete to anon using (true);
+
+------------------------------------------------------------------------
+-- storage: public `goals` bucket for uploaded goal + reward + food photos
 ------------------------------------------------------------------------
 
 insert into storage.buckets (id, name, public)

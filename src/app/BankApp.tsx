@@ -348,6 +348,16 @@ function StarIcon({
   );
 }
 
+function GridIcon({ className = "", color = "#2b2b2b" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      {[[4, 4], [14, 4], [4, 14], [14, 14]].map(([x, y], i) => (
+        <rect key={i} x={x} y={y} width="6" height="6" rx="1.8" stroke={color} strokeWidth="2" />
+      ))}
+    </svg>
+  );
+}
+
 function ChevronLeftIcon({ className = "", color = "#2b2b2b" }: { className?: string; color?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
@@ -605,7 +615,7 @@ function Avatar({ person, size }: { person: Person; size: number }) {
 /*  Screen                                                            */
 /* ------------------------------------------------------------------ */
 
-export default function BankApp() {
+export default function BankApp({ onExitToApps }: { onExitToApps?: () => void }) {
   const [who, setWho] = useState<Person>("luca");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
@@ -1277,6 +1287,20 @@ export default function BankApp() {
   return (
     <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
       <div className="flex flex-1 flex-col gap-2.5 px-4 pb-20 pt-[max(env(safe-area-inset-top),14px)]">
+        {/* ---- back to the app launcher ---- */}
+        {onExitToApps && (
+          <div className="flex">
+            <button
+              type="button"
+              onClick={onExitToApps}
+              className="flex items-center gap-1 rounded-full bg-white/85 px-3 py-1.5 text-[13px] text-[#2b2b2b] shadow-[0_4px_12px_rgba(120,150,200,0.18)] backdrop-blur transition active:scale-95"
+            >
+              <GridIcon className="w-4" />
+              Apps
+            </button>
+          </div>
+        )}
+
         {/* ---- Shared Bank card ---- */}
         <section className="relative overflow-hidden rounded-[22px] bg-[#e7f1fd] px-5 pt-5 pb-6 shadow-[0_8px_24px_rgba(120,150,200,0.18)]">
           <p className="text-center text-[15px] text-[#3a3a3a]">Shared Bank</p>

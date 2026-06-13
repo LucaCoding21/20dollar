@@ -50,3 +50,15 @@ export type Reward = {
   done_at: string | null; // when the task was marked complete
   claimed_at: string | null; // when the reward was redeemed
 };
+
+// A food in the shared S/A/B/C/D tier list (the "Food Tiers" app). `tier` is
+// null while the food is still unranked. `image_url` points at a photo in the
+// public `goals` storage bucket (reused for all uploads).
+export type FoodTier = "S" | "A" | "B" | "C" | "D";
+export type FoodItem = {
+  id: string;
+  created_at: string;
+  name: string;
+  image_url: string | null;
+  tier: FoodTier | null;
+};

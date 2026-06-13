@@ -1,4 +1,4 @@
-import BankApp from "./BankApp";
+import Shell from "./Shell";
 
 export default function Home() {
   return (
@@ -10,7 +10,7 @@ export default function Home() {
         className="fixed inset-0 -z-10 bg-cover bg-center"
         style={{ backgroundImage: "url('/clouds.webp')" }}
       />
-      <BankApp />
+      <Shell />
     </main>
   );
 }
