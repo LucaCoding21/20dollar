@@ -15,7 +15,8 @@ create table if not exists public.expenses (
   amount     numeric     not null,   -- dollars spent; negative adds money back
   note       text,
   category   text,                   -- category slug, e.g. 'food', 'transport'
-  gif_url    text                    -- optional GIPHY gif attached to the txn
+  gif_url    text,                   -- optional GIPHY gif attached to the txn
+  from_reward boolean not null default false  -- paid from reward money, not bank
 );
 
 alter table public.expenses enable row level security;
@@ -71,7 +72,43 @@ create policy "anon can delete goals"
   on public.goals for delete to anon using (true);
 
 ------------------------------------------------------------------------
--- storage: public `goals` bucket for uploaded goal photos
+-- rewards: a treat/cash reward gated behind completing a task
+------------------------------------------------------------------------
+
+create table if not exists public.rewards (
+  id         uuid        primary key default gen_random_uuid(),
+  created_at timestamptz not null    default now(),
+  title      text        not null,                  -- the reward, e.g. "Lashes"
+  task       text        not null,                  -- task to finish to unlock it
+  kind       text        not null default 'treat'   -- 'treat' (a thing) or 'cash'
+             check (kind in ('treat', 'cash')),
+  amount     numeric,                               -- dollar value when kind='cash'
+  person     text        check (person is null or person in ('luca', 'irish')),
+  image_url  text,                                  -- optional photo (goals bucket)
+  done_at    timestamptz,                           -- when the task was completed
+  claimed_at timestamptz                            -- when the reward was redeemed
+);
+
+alter table public.rewards enable row level security;
+
+grant select, insert, update, delete on public.rewards to anon;
+
+drop policy if exists "anon can read rewards"   on public.rewards;
+drop policy if exists "anon can insert rewards" on public.rewards;
+drop policy if exists "anon can update rewards" on public.rewards;
+drop policy if exists "anon can delete rewards" on public.rewards;
+
+create policy "anon can read rewards"
+  on public.rewards for select to anon using (true);
+create policy "anon can insert rewards"
+  on public.rewards for insert to anon with check (true);
+create policy "anon can update rewards"
+  on public.rewards for update to anon using (true) with check (true);
+create policy "anon can delete rewards"
+  on public.rewards for delete to anon using (true);
+
+------------------------------------------------------------------------
+-- storage: public `goals` bucket for uploaded goal + reward photos
 ------------------------------------------------------------------------
 
 insert into storage.buckets (id, name, public)

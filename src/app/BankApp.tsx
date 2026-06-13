@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase, type Expense, type Goal, type Person } from "@/lib/supabase";
+import { supabase, type Expense, type Goal, type Person, type Reward } from "@/lib/supabase";
 import { bankBalance, DAILY_ALLOWANCE } from "@/lib/bank";
 
 /* ------------------------------------------------------------------ */
@@ -189,6 +189,49 @@ async function uploadGoalImage(file: File): Promise<string | null> {
   return supabase.storage.from("goals").getPublicUrl(path).data.publicUrl;
 }
 
+// A reward moves through three states: locked (task not done) → ready (task
+// done, not yet redeemed) → claimed. Derived purely from the two timestamps.
+type RewardStatus = "locked" | "ready" | "claimed";
+function rewardStatus(r: Reward): RewardStatus {
+  if (r.claimed_at) return "claimed";
+  if (r.done_at) return "ready";
+  return "locked";
+}
+
+// Per-person reward "wallet": cash earned from claimed cash rewards, minus what
+// has already been spent through reward-funded transactions. `available` is the
+// spendable balance. "Anyone" rewards aren't tied to a person, so they sit out.
+function computeRewardMoney(
+  rewards: Reward[],
+  expenses: Expense[],
+): { earned: Record<Person, number>; spent: Record<Person, number>; available: Record<Person, number> } {
+  const earned: Record<Person, number> = { luca: 0, irish: 0 };
+  for (const r of rewards) {
+    if (r.kind !== "cash" || rewardStatus(r) !== "claimed") continue;
+    if (r.person === "luca" || r.person === "irish") earned[r.person] += Number(r.amount) || 0;
+  }
+  const spent: Record<Person, number> = { luca: 0, irish: 0 };
+  for (const e of expenses) {
+    if (!e.from_reward) continue;
+    const amt = Number(e.amount);
+    if (amt > 0 && (e.person === "luca" || e.person === "irish")) spent[e.person] += amt;
+  }
+  return {
+    earned,
+    spent,
+    available: { luca: earned.luca - spent.luca, irish: earned.irish - spent.irish },
+  };
+}
+
+// "May 10" — a short civil date in Vancouver, for reward done/claimed stamps.
+function shortDate(iso: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: VANCOUVER,
+    month: "short",
+    day: "numeric",
+  }).format(new Date(iso));
+}
+
 // "Today · 9:12 AM" / "Yesterday · 6:47 PM" / "May 10 · 8:21 AM" — civil dates
 // compared in Vancouver time so the labels match the allowance roll-over.
 function formatWhen(iso: string, now: Date): string {
@@ -305,20 +348,6 @@ function StarIcon({
   );
 }
 
-function GearIcon({ className = "", color = "#1f1f1f" }: { className?: string; color?: string }) {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" className={className}>
-      <path
-        d="M13.5 3.2h5l.7 3.1c.9.3 1.7.8 2.5 1.4l3-1.1 2.5 4.3-2.3 2.1c.1.5.1 1 .1 1.5s0 1-.1 1.5l2.3 2.1-2.5 4.3-3-1.1c-.8.6-1.6 1.1-2.5 1.4l-.7 3.1h-5l-.7-3.1c-.9-.3-1.7-.8-2.5-1.4l-3 1.1-2.5-4.3 2.3-2.1c-.1-.5-.1-1-.1-1.5s0-1 .1-1.5L1.3 11l2.5-4.3 3 1.1c.8-.6 1.6-1.1 2.5-1.4l.7-3.2Z"
-        stroke={color}
-        strokeWidth="2.2"
-        strokeLinejoin="round"
-      />
-      <circle cx="16" cy="16" r="4" stroke={color} strokeWidth="2.2" />
-    </svg>
-  );
-}
-
 function ChevronLeftIcon({ className = "", color = "#2b2b2b" }: { className?: string; color?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
@@ -401,6 +430,34 @@ function CameraIcon({ className = "", color = "#9a9aa0" }: { className?: string;
   );
 }
 
+function GiftIcon({ className = "", color = "#2b2b2b" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M4 11.5h16V20a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 20v-8.5Z" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+      <path d="M3 8h18v3.5H3V8ZM12 8v13.5" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+      <path d="M12 8S10.6 3.5 8 3.5A2.5 2.5 0 0 0 8 8.5c2.6 0 4-0.5 4-0.5Zm0 0s1.4-4.5 4-4.5a2.5 2.5 0 0 1 0 5c-2.6 0-4-.5-4-.5Z" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function LockIcon({ className = "", color = "#9a9aa0" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="5" y="10.5" width="14" height="10" rx="2.5" stroke={color} strokeWidth="2" />
+      <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="15.5" r="1.4" fill={color} />
+    </svg>
+  );
+}
+
+function CheckIcon({ className = "", color = "#ffffff" }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M5 12.5l4.5 4.5L19 7" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Small building blocks                                             */
 /* ------------------------------------------------------------------ */
@@ -425,6 +482,30 @@ function GoalImage({ url, size, className = "" }: { url: string | null; size: nu
       style={{ width: size, height: size }}
     >
       <StarIcon className="w-1/2" color="#9bb4e6" />
+    </span>
+  );
+}
+
+// A reward's icon is its uploaded photo (square crop), falling back to a gift
+// tile when there's no photo. Mirrors GoalImage so the two screens feel alike.
+function RewardImage({ url, size, className = "" }: { url: string | null; size: number; className?: string }) {
+  if (url) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt=""
+        className={`shrink-0 rounded-[14px] object-cover ${className}`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-[14px] bg-[#fbeef6] ${className}`}
+      style={{ width: size, height: size }}
+    >
+      <GiftIcon className="w-1/2" color="#d98bbd" />
     </span>
   );
 }
@@ -485,6 +566,9 @@ export default function BankApp() {
   const [who, setWho] = useState<Person>("luca");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  // Where the new transaction is funded from: the shared $20 bank, or the
+  // person's earned reward money (which doesn't touch the bank).
+  const [paySource, setPaySource] = useState<"bank" | "reward">("bank");
   // Optional GIPHY gif attached to the new transaction, plus picker visibility.
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
@@ -497,7 +581,7 @@ export default function BankApp() {
 
   // Which screen is showing. Home tab = home/all; Goals tab = goals/allGoals.
   const [view, setView] = useState<
-    "home" | "all" | "goals" | "allGoals" | "analytics" | "category"
+    "home" | "all" | "goals" | "allGoals" | "analytics" | "category" | "rewards"
   >("home");
   // The category whose full history is showing on the "category" screen.
   const [categorySlug, setCategorySlug] = useState<string | null>(null);
@@ -521,6 +605,14 @@ export default function BankApp() {
   const [pendingDeleteGoal, setPendingDeleteGoal] = useState<Goal | null>(null);
   // A goal the user tapped to inspect (read-only detail sheet).
   const [goalDetail, setGoalDetail] = useState<Goal | null>(null);
+
+  // Rewards screen state: the list, plus which reward is being created / edited /
+  // inspected / removed.
+  const [rewards, setRewards] = useState<Reward[]>([]);
+  const [newRewardOpen, setNewRewardOpen] = useState(false);
+  const [editingReward, setEditingReward] = useState<Reward | null>(null);
+  const [rewardDetail, setRewardDetail] = useState<Reward | null>(null);
+  const [pendingDeleteReward, setPendingDeleteReward] = useState<Reward | null>(null);
 
   // Re-render every minute so the balance rolls over at Vancouver midnight.
   const [now, setNow] = useState(() => new Date());
@@ -558,9 +650,10 @@ export default function BankApp() {
   }, []);
 
   const load = useCallback(async () => {
-    const [ex, gl] = await Promise.all([
+    const [ex, gl, rw] = await Promise.all([
       supabase.from("expenses").select("*").order("created_at", { ascending: false }),
       supabase.from("goals").select("*").order("created_at", { ascending: false }),
+      supabase.from("rewards").select("*").order("created_at", { ascending: false }),
     ]);
     if (ex.error) setError(ex.error.message);
     else if (gl.error) setError(gl.error.message);
@@ -569,7 +662,22 @@ export default function BankApp() {
       setExpenses((ex.data ?? []) as Expense[]);
       setGoals((gl.data ?? []) as Goal[]);
     }
+    // Rewards are non-critical: if the table isn't there yet (migration not run)
+    // we keep the rest of the app working and just show no rewards.
+    if (!rw.error) setRewards((rw.data ?? []) as Reward[]);
     setLoading(false);
+  }, []);
+
+  const loadRewards = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("rewards")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) setError(error.message);
+    else {
+      setError(null);
+      setRewards((data ?? []) as Reward[]);
+    }
   }, []);
 
   const loadGoals = useCallback(async () => {
@@ -588,8 +696,10 @@ export default function BankApp() {
     load();
   }, [load]);
 
+  // Reward-funded spends draw down the reward wallet, not the $20 bank, so they
+  // don't count toward the bank balance.
   const totalSpent = useMemo(
-    () => expenses.reduce((sum, e) => sum + Number(e.amount), 0),
+    () => expenses.reduce((sum, e) => (e.from_reward ? sum : sum + Number(e.amount)), 0),
     [expenses],
   );
   // Money parked in goals is set aside from the bank, so it shrinks the
@@ -600,9 +710,17 @@ export default function BankApp() {
   );
   const balance = bankBalance(totalSpent + totalSaved, now);
 
+  // Per-person reward wallet (earned − spent). Drives the cap on reward-funded
+  // spends and the Reward money cards.
+  const rewardMoney = useMemo(() => computeRewardMoney(rewards, expenses), [rewards, expenses]);
+  // What the selected person can still spend from reward money right now.
+  const rewardAvailable = Math.max(0, rewardMoney.available[who]);
+
   async function submit() {
     const value = Number(amount);
     if (!Number.isFinite(value) || value === 0 || saving) return;
+    // A reward-funded spend can't exceed what that person has earned.
+    if (paySource === "reward" && (value <= 0 || value > rewardAvailable + 1e-9)) return;
 
     setSaving(true);
     const trimmed = note.trim();
@@ -612,6 +730,7 @@ export default function BankApp() {
       note: trimmed || null,
       category: inferCategory(trimmed),
       gif_url: gifUrl,
+      from_reward: paySource === "reward",
     });
     setSaving(false);
 
@@ -622,6 +741,7 @@ export default function BankApp() {
     setAmount("");
     setNote("");
     setGifUrl(null);
+    setPaySource("bank");
     load();
   }
 
@@ -773,6 +893,112 @@ export default function BankApp() {
     loadGoals();
   }
 
+  /* ---- reward operations ---- */
+
+  async function createReward(next: {
+    title: string;
+    task: string;
+    kind: "treat" | "cash";
+    amount: number | null;
+    person: Person | null;
+    image_url: string | null;
+  }): Promise<boolean> {
+    const { error } = await supabase.from("rewards").insert({
+      title: next.title,
+      task: next.task,
+      kind: next.kind,
+      amount: next.kind === "cash" ? next.amount : null,
+      person: next.person,
+      image_url: next.image_url,
+    });
+    if (error) {
+      setError(error.message);
+      return false;
+    }
+    setError(null);
+    setNewRewardOpen(false);
+    loadRewards();
+    return true;
+  }
+
+  async function saveRewardEdit(
+    reward: Reward,
+    next: {
+      title: string;
+      task: string;
+      kind: "treat" | "cash";
+      amount: number | null;
+      person: Person | null;
+      image_url: string | null;
+    },
+  ): Promise<boolean> {
+    const { error } = await supabase
+      .from("rewards")
+      .update({
+        title: next.title,
+        task: next.task,
+        kind: next.kind,
+        amount: next.kind === "cash" ? next.amount : null,
+        person: next.person,
+        image_url: next.image_url,
+      })
+      .eq("id", reward.id);
+    if (error) {
+      setError(error.message);
+      return false;
+    }
+    setError(null);
+    setEditingReward(null);
+    loadRewards();
+    return true;
+  }
+
+  // Mark the gating task done / not done. Un-completing also voids any claim, so
+  // a reward can't be "claimed" while its task is open.
+  async function setRewardDone(reward: Reward, done: boolean): Promise<boolean> {
+    const { error } = await supabase
+      .from("rewards")
+      .update(
+        done
+          ? { done_at: new Date().toISOString() }
+          : { done_at: null, claimed_at: null },
+      )
+      .eq("id", reward.id);
+    if (error) {
+      setError(error.message);
+      return false;
+    }
+    setError(null);
+    loadRewards();
+    return true;
+  }
+
+  // Redeem (or un-redeem) a reward once its task is done.
+  async function setRewardClaimed(reward: Reward, claimed: boolean): Promise<boolean> {
+    const { error } = await supabase
+      .from("rewards")
+      .update({ claimed_at: claimed ? new Date().toISOString() : null })
+      .eq("id", reward.id);
+    if (error) {
+      setError(error.message);
+      return false;
+    }
+    setError(null);
+    loadRewards();
+    return true;
+  }
+
+  async function deleteReward(reward: Reward) {
+    const { error } = await supabase.from("rewards").delete().eq("id", reward.id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setError(null);
+    setPendingDeleteReward(null);
+    loadRewards();
+  }
+
   // Shared modal stack for the goals screens (mounted by both goals + allGoals).
   const goalModals = (
     <>
@@ -826,6 +1052,51 @@ export default function BankApp() {
     </>
   );
 
+  // Shared modal stack for the rewards screen.
+  const rewardModals = (
+    <>
+      {rewardDetail && (
+        <RewardDetailModal
+          reward={rewardDetail}
+          onClose={() => setRewardDetail(null)}
+          onToggleDone={async (done) => {
+            const ok = await setRewardDone(rewardDetail, done);
+            if (ok) setRewardDetail((r) => (r ? { ...r, done_at: done ? new Date().toISOString() : null, claimed_at: done ? r.claimed_at : null } : r));
+          }}
+          onToggleClaim={async (claimed) => {
+            const ok = await setRewardClaimed(rewardDetail, claimed);
+            if (ok) setRewardDetail((r) => (r ? { ...r, claimed_at: claimed ? new Date().toISOString() : null } : r));
+          }}
+          onEdit={() => {
+            setEditingReward(rewardDetail);
+            setRewardDetail(null);
+          }}
+          onDelete={() => {
+            setPendingDeleteReward(rewardDetail);
+            setRewardDetail(null);
+          }}
+        />
+      )}
+      {newRewardOpen && (
+        <RewardFormModal onClose={() => setNewRewardOpen(false)} onSave={createReward} />
+      )}
+      {editingReward && (
+        <RewardFormModal
+          reward={editingReward}
+          onClose={() => setEditingReward(null)}
+          onSave={(next) => saveRewardEdit(editingReward, next)}
+        />
+      )}
+      {pendingDeleteReward && (
+        <ConfirmDeleteRewardModal
+          reward={pendingDeleteReward}
+          onCancel={() => setPendingDeleteReward(null)}
+          onConfirm={() => deleteReward(pendingDeleteReward)}
+        />
+      )}
+    </>
+  );
+
   if (view === "analytics") {
     return (
       <AnalyticsScreen
@@ -834,6 +1105,7 @@ export default function BankApp() {
         now={now}
         onHome={() => setView("home")}
         onGoals={() => setView("goals")}
+        onRewards={() => setView("rewards")}
         onViewCategory={(slug) => {
           setCategorySlug(slug);
           setView("category");
@@ -852,6 +1124,7 @@ export default function BankApp() {
         onBack={() => setView("analytics")}
         onHome={() => setView("home")}
         onGoals={() => setView("goals")}
+        onRewards={() => setView("rewards")}
       />
     );
   }
@@ -867,6 +1140,7 @@ export default function BankApp() {
         onBack={() => setView("home")}
         onGoals={() => setView("goals")}
         onAnalytics={() => setView("analytics")}
+        onRewards={() => setView("rewards")}
         onEdit={setEditing}
         onDelete={setPendingDelete}
         editing={editing}
@@ -894,6 +1168,7 @@ export default function BankApp() {
           onEdit={setEditingGoal}
           onDetails={setGoalDetail}
           onAnalytics={() => setView("analytics")}
+          onRewards={() => setView("rewards")}
         />
         {goalModals}
       </>
@@ -915,8 +1190,28 @@ export default function BankApp() {
           onDelete={setPendingDeleteGoal}
           onSetCurrent={setGoalCurrent}
           onAnalytics={() => setView("analytics")}
+          onRewards={() => setView("rewards")}
         />
         {goalModals}
+      </>
+    );
+  }
+
+  if (view === "rewards") {
+    return (
+      <>
+        <RewardsScreen
+          rewards={rewards}
+          expenses={expenses}
+          loading={loading}
+          error={error}
+          onHome={() => setView("home")}
+          onGoals={() => setView("goals")}
+          onAnalytics={() => setView("analytics")}
+          onNewReward={() => setNewRewardOpen(true)}
+          onDetails={setRewardDetail}
+        />
+        {rewardModals}
       </>
     );
   }
@@ -990,6 +1285,36 @@ export default function BankApp() {
             </div>
           </div>
 
+          {/* pay with: shared bank or earned reward money */}
+          <div className="mb-3">
+            <div className="flex overflow-hidden rounded-[14px] border border-[#e7e9ef]">
+              {(["bank", "reward"] as const).map((src) => {
+                const active = paySource === src;
+                return (
+                  <button
+                    key={src}
+                    type="button"
+                    onClick={() => setPaySource(src)}
+                    className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-[13px] transition ${
+                      active ? "bg-[#dbe3f6] text-[#2f63e6]" : "text-[#8d8d93]"
+                    }`}
+                  >
+                    {src === "reward" && <GiftIcon className="w-3.5" color={active ? "#2f63e6" : "#9a9aa0"} />}
+                    {src === "bank" ? "Bank" : "Reward money"}
+                  </button>
+                );
+              })}
+            </div>
+            {paySource === "reward" && (
+              <p className="mt-1.5 text-[12px] text-[#8d8d93]">
+                {NAME[who]} has <span className="text-[#2b2b2b]">{money(rewardAvailable)}</span> of reward money
+              </p>
+            )}
+            {paySource === "reward" && Number(amount) > rewardAvailable + 1e-9 && (
+              <p className="mt-1 text-[12px] text-[#d4453e]">That&apos;s more than {NAME[who]}&apos;s reward money.</p>
+            )}
+          </div>
+
           {/* gif */}
           {gifUrl ? (
             <div className="relative mb-3 overflow-hidden rounded-[14px] ring-1 ring-[#e7e9ef]">
@@ -1019,10 +1344,14 @@ export default function BankApp() {
           <button
             type="button"
             onClick={submit}
-            disabled={saving || amount.trim() === ""}
+            disabled={
+              saving ||
+              amount.trim() === "" ||
+              (paySource === "reward" && !(Number(amount) > 0 && Number(amount) <= rewardAvailable + 1e-9))
+            }
             className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
           >
-            {saving ? "Adding…" : "+ Add transaction"}
+            {saving ? "Adding…" : paySource === "reward" ? "Spend reward money" : "+ Add transaction"}
           </button>
           {error && (
             <p className="mt-2.5 text-center text-[12px] text-[#d4453e]">{error}</p>
@@ -1078,7 +1407,9 @@ export default function BankApp() {
                         {text}
                       </span>
                       <span className="flex w-6 shrink-0 justify-center">
-                        {spent ? (
+                        {e.from_reward ? (
+                          <GiftIcon className="w-5" color="#d98bbd" />
+                        ) : spent ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={categoryIcon(e.category)} alt="" loading="lazy" decoding="async" className="h-5 w-5 object-contain" />
                         ) : (
@@ -1141,6 +1472,7 @@ export default function BankApp() {
         onHome={() => setView("home")}
         onGoals={() => setView("goals")}
         onAnalytics={() => setView("analytics")}
+        onRewards={() => setView("rewards")}
       />
 
       {gifPickerOpen && (
@@ -1293,18 +1625,19 @@ function NavItem({
   );
 }
 
-// Shared bottom nav. `tab` highlights the active section; Home, Analytics, and
-// Goals route. Settings isn't built yet (no-op).
+// Shared bottom nav. `tab` highlights the active section; all four route.
 function BottomNav({
   tab,
   onHome,
   onGoals,
   onAnalytics,
+  onRewards,
 }: {
-  tab: "home" | "goals" | "analytics";
+  tab: "home" | "goals" | "analytics" | "rewards";
   onHome: () => void;
   onGoals: () => void;
   onAnalytics: () => void;
+  onRewards: () => void;
 }) {
   const blue = "#2f63e6";
   const dark = "#1f1f1f";
@@ -1319,10 +1652,10 @@ function BottomNav({
             icon={<HomeIcon className="w-5" color={tab === "home" ? blue : dark} />}
           />
           <NavItem
-            label="Analytics"
-            active={tab === "analytics"}
-            onClick={onAnalytics}
-            icon={<BarsIcon className="w-5" color={tab === "analytics" ? blue : dark} />}
+            label="Task"
+            active={tab === "rewards"}
+            onClick={onRewards}
+            icon={<GiftIcon className="w-5" color={tab === "rewards" ? blue : dark} />}
           />
           <NavItem
             label="Goals"
@@ -1330,7 +1663,12 @@ function BottomNav({
             onClick={onGoals}
             icon={<StarIcon className="w-5" color={tab === "goals" ? blue : dark} />}
           />
-          <NavItem label="Settings" icon={<GearIcon className="w-5" />} />
+          <NavItem
+            label="Analytics"
+            active={tab === "analytics"}
+            onClick={onAnalytics}
+            icon={<BarsIcon className="w-5" color={tab === "analytics" ? blue : dark} />}
+          />
         </div>
       </div>
     </nav>
@@ -1374,6 +1712,7 @@ function AllActivityScreen({
   onBack,
   onGoals,
   onAnalytics,
+  onRewards,
   onEdit,
   onDelete,
   editing,
@@ -1392,6 +1731,7 @@ function AllActivityScreen({
   onBack: () => void;
   onGoals: () => void;
   onAnalytics: () => void;
+  onRewards: () => void;
   onEdit: (e: Expense) => void;
   onDelete: (e: Expense) => void;
   editing: Expense | null;
@@ -1470,8 +1810,11 @@ function AllActivityScreen({
                   >
                     <Avatar person={e.person} size={32} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[14px] leading-tight text-[#2b2b2b]">
-                        {NAME[e.person]} <span className="mx-1 text-[#c2c2c8]">·</span> {label}
+                      <p className="flex items-center gap-1 text-[14px] leading-tight text-[#2b2b2b]">
+                        <span className="truncate">
+                          {NAME[e.person]} <span className="mx-1 text-[#c2c2c8]">·</span> {label}
+                        </span>
+                        {e.from_reward && <GiftIcon className="w-3.5 shrink-0" color="#d98bbd" />}
                       </p>
                       <p className="mt-0.5 text-[11px] text-[#a9a9b0]">
                         {formatWhen(e.created_at, now)}
@@ -1516,7 +1859,7 @@ function AllActivityScreen({
         />
       )}
 
-      <BottomNav tab="home" onHome={onBack} onGoals={onGoals} onAnalytics={onAnalytics} />
+      <BottomNav tab="home" onHome={onBack} onGoals={onGoals} onAnalytics={onAnalytics} onRewards={onRewards} />
     </div>
   );
 }
@@ -1716,6 +2059,19 @@ function TransactionDetailModal({
                 <HeartIcon className="w-4" />
               )}
               {categoryName}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[12px] text-[#a9a9b0]">Paid with</span>
+            <span className="flex items-center gap-1.5 text-[14px] text-[#2b2b2b]">
+              {expense.from_reward ? (
+                <>
+                  <GiftIcon className="w-4" color="#d98bbd" />
+                  Reward money
+                </>
+              ) : (
+                "Bank"
+              )}
             </span>
           </div>
         </div>
@@ -2060,6 +2416,7 @@ function GoalsScreen({
   onEdit,
   onDetails,
   onAnalytics,
+  onRewards,
 }: {
   goals: Goal[];
   loading: boolean;
@@ -2071,6 +2428,7 @@ function GoalsScreen({
   onEdit: (g: Goal) => void;
   onDetails: (g: Goal) => void;
   onAnalytics: () => void;
+  onRewards: () => void;
 }) {
   // The featured goal is the one flagged current; fall back to the newest.
   const current = goals.find((g) => g.is_current) ?? goals[0] ?? null;
@@ -2144,7 +2502,7 @@ function GoalsScreen({
         )}
       </div>
 
-      <BottomNav tab="goals" onHome={onHome} onGoals={() => {}} onAnalytics={onAnalytics} />
+      <BottomNav tab="goals" onHome={onHome} onGoals={() => {}} onAnalytics={onAnalytics} onRewards={onRewards} />
     </div>
   );
 }
@@ -2232,6 +2590,7 @@ function AllGoalsScreen({
   onDelete,
   onSetCurrent,
   onAnalytics,
+  onRewards,
 }: {
   goals: Goal[];
   loading: boolean;
@@ -2244,6 +2603,7 @@ function AllGoalsScreen({
   onDelete: (g: Goal) => void;
   onSetCurrent: (g: Goal) => void;
   onAnalytics: () => void;
+  onRewards: () => void;
 }) {
   return (
     <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
@@ -2299,7 +2659,7 @@ function AllGoalsScreen({
         </section>
       </div>
 
-      <BottomNav tab="goals" onHome={onHome} onGoals={onBack} onAnalytics={onAnalytics} />
+      <BottomNav tab="goals" onHome={onHome} onGoals={onBack} onAnalytics={onAnalytics} onRewards={onRewards} />
     </div>
   );
 }
@@ -2576,7 +2936,6 @@ function BagIcon({ className = "", color = "#2b2b2b" }: { className?: string; co
 }
 
 const VANCOUVER_TZ = VANCOUVER;
-const WEEKDAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 
 function vanYMD(d: Date): { year: number; month: number; day: number } {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -2667,6 +3026,7 @@ function weekStats(expenses: Expense[], now: Date): WeekStats {
   for (const e of expenses) {
     const amt = Number(e.amount);
     if (amt <= 0) continue; // only spends
+    if (e.from_reward) continue; // reward-funded spends aren't bank spending
     const idx = dayNum(vanYMD(new Date(e.created_at))) - weekStart;
     if (idx < 0 || idx > 6) continue;
     daily[idx] += amt;
@@ -2699,44 +3059,13 @@ function weekStats(expenses: Expense[], now: Date): WeekStats {
   return { spent, daysElapsed, weekBudget, left, avgPerDay, daysUnder, daily, byPerson, byCategory };
 }
 
-// Donut split of the bank between the two people. Luca is the blue arc, Irish
-// the pink remainder; the total sits in the hole.
-function SplitDonut({ luca, irish }: { luca: number; irish: number }) {
-  const total = luca + irish;
-  const r = 52;
-  const c = 2 * Math.PI * r;
-  const lucaFrac = total > 0 ? luca / total : 0;
-  return (
-    <svg viewBox="0 0 140 140" className="h-[118px] w-[118px]">
-      <g transform="translate(140,0) scale(-1,1) rotate(-90 70 70)">
-        <circle cx="70" cy="70" r={r} fill="none" stroke="#f4abce" strokeWidth="17" />
-        <circle
-          cx="70"
-          cy="70"
-          r={r}
-          fill="none"
-          stroke="#5e8be8"
-          strokeWidth="17"
-          strokeDasharray={`${lucaFrac * c} ${c}`}
-          strokeLinecap="round"
-        />
-      </g>
-      <text x="70" y="65" textAnchor="middle" className="fill-[#2b2b2b]" style={{ fontSize: 20 }}>
-        {money(total)}
-      </text>
-      <text x="70" y="84" textAnchor="middle" className="fill-[#a9a9b0]" style={{ fontSize: 12 }}>
-        total
-      </text>
-    </svg>
-  );
-}
-
 function AnalyticsScreen({
   expenses,
   loading,
   now,
   onHome,
   onGoals,
+  onRewards,
   onViewCategory,
 }: {
   expenses: Expense[];
@@ -2744,15 +3073,13 @@ function AnalyticsScreen({
   now: Date;
   onHome: () => void;
   onGoals: () => void;
+  onRewards: () => void;
   onViewCategory: (slug: string) => void;
 }) {
   const stats = useMemo(() => weekStats(expenses, now), [expenses, now]);
   const [sheetSlug, setSheetSlug] = useState<string | null>(null);
-  const lucaPct = stats.spent > 0 ? Math.round((stats.byPerson.luca / stats.spent) * 100) : 0;
-  const irishPct = stats.spent > 0 ? 100 - lucaPct : 0;
   const catMax = Math.max(1, ...stats.byCategory.map((c) => c.amount));
   const top = stats.byCategory.slice(0, 5);
-  const maxDaily = Math.max(1, ...stats.daily);
   const over = stats.left < 0;
   const budgetPct = Math.min(100, (stats.spent / Math.max(1, stats.weekBudget)) * 100);
 
@@ -2793,41 +3120,11 @@ function AnalyticsScreen({
               style={{ width: `${loading ? 0 : budgetPct}%` }}
             />
           </div>
-          {/* supporting stats */}
-          <div className="mt-3 flex items-stretch divide-x divide-[#eef1f8] border-t border-[#eef1f8] pt-3">
-            <Stat
-              label="Avg / day"
-              value={loading ? "—" : `$${stats.avgPerDay.toFixed(2)}`}
-              className="pr-2"
-            />
-            <Stat
-              label="Days under $20"
-              value={loading ? "—" : `${stats.daysUnder}`}
-              unit={`/ ${stats.daysElapsed}`}
-              className="pl-2"
-            />
-          </div>
-        </section>
-
-        {/* ---- Spending split ---- */}
-        <section className="rounded-[22px] bg-white px-4 pt-3 pb-3.5 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
-          <div className="mb-1 flex items-center gap-1.5">
-            <h2 className="text-[16px] font-bold text-[#2b2b2b]">Spending split</h2>
-            <HeartIcon className="w-3.5" color="#f3a6c9" />
-          </div>
-          <div className="flex items-center justify-between">
-            <SplitPerson person="luca" amount={stats.byPerson.luca} heartColor="#2f63e6" />
-            <SplitDonut luca={stats.byPerson.luca} irish={stats.byPerson.irish} />
-            <SplitPerson person="irish" amount={stats.byPerson.irish} heartColor="#f3a6c9" align="right" />
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-[12px] text-[#5e8be8]">{lucaPct}%</span>
-            <div className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-[#f0f2f7]">
-              <div className="h-full bg-[#5e8be8]" style={{ width: `${lucaPct}%` }} />
-              <div className="h-full flex-1 bg-[#f4abce]" />
-            </div>
-            <span className="text-[12px] text-[#e58fb6]">{irishPct}%</span>
-          </div>
+          {!loading && (
+            <p className="mt-2 text-[12px] text-[#a9a9b0]">
+              Averaging ${stats.avgPerDay.toFixed(2)} a day this week
+            </p>
+          )}
         </section>
 
         {/* ---- Where it went ---- */}
@@ -2869,46 +3166,6 @@ function AnalyticsScreen({
           )}
         </section>
 
-        {/* ---- Daily spend ---- */}
-        <section className="rounded-[22px] bg-white px-4 pt-3 pb-3 shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="text-[16px] font-bold text-[#2b2b2b]">Daily spend</h2>
-              <BarsIcon className="w-4" color="#9aa0ab" />
-            </div>
-            <HeartIcon className="w-3.5" color="#2b2b2b" />
-          </div>
-          <div className="relative mt-1 flex h-[124px] items-end justify-between gap-1.5 px-0.5 pt-5">
-            {stats.daily.map((v, i) => (
-              <div key={i} className="flex flex-1 flex-col items-center justify-end gap-1">
-                {v > 0 && <span className="text-[10px] text-[#9aa0ab]">{money(v)}</span>}
-                <div
-                  className="w-[62%] rounded-t-[6px] bg-gradient-to-b from-[#6f9af0] to-[#5a86e6]"
-                  style={{ height: `${Math.max(v > 0 ? 6 : 0, (v / maxDaily) * 84)}px` }}
-                />
-              </div>
-            ))}
-            {/* weekly average line */}
-            {stats.spent > 0 && (
-              <div
-                className="pointer-events-none absolute inset-x-0 z-10 flex items-center"
-                style={{ bottom: `${(stats.avgPerDay / maxDaily) * 84}px` }}
-              >
-                <div className="flex-1 border-t-2 border-dotted border-[#9bb0d6]" />
-                <span className="ml-1 shrink-0 rounded-full bg-[#eef3fb] px-1.5 py-[1px] text-[9px] text-[#5e8be8]">
-                  avg {money(stats.avgPerDay)}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="mt-1.5 flex justify-between px-0.5">
-            {WEEKDAY_LETTERS.map((d, i) => (
-              <span key={i} className="flex-1 text-center text-[11px] text-[#9aa0ab]">
-                {d}
-              </span>
-            ))}
-          </div>
-        </section>
       </div>
 
       {sheetSlug && (
@@ -2926,7 +3183,7 @@ function AnalyticsScreen({
         />
       )}
 
-      <BottomNav tab="analytics" onHome={onHome} onGoals={onGoals} onAnalytics={() => {}} />
+      <BottomNav tab="analytics" onHome={onHome} onGoals={onGoals} onAnalytics={() => {}} onRewards={onRewards} />
     </div>
   );
 }
@@ -3024,7 +3281,7 @@ function CategoryDetailSheet({
 }) {
   const label = CATEGORY_LABEL[slug] ?? slug;
   const rows = expenses
-    .filter((e) => Number(e.amount) > 0 && expenseSlug(e) === slug && isThisWeek(e.created_at, now))
+    .filter((e) => Number(e.amount) > 0 && !e.from_reward && expenseSlug(e) === slug && isThisWeek(e.created_at, now))
     .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
   const total = rows.reduce((s, e) => s + Number(e.amount), 0);
   const pct = stats.spent > 0 ? Math.round((total / stats.spent) * 100) : 0;
@@ -3101,6 +3358,7 @@ function CategoryActivityScreen({
   onBack,
   onHome,
   onGoals,
+  onRewards,
 }: {
   slug: string;
   expenses: Expense[];
@@ -3109,9 +3367,10 @@ function CategoryActivityScreen({
   onBack: () => void;
   onHome: () => void;
   onGoals: () => void;
+  onRewards: () => void;
 }) {
   const label = CATEGORY_LABEL[slug] ?? slug;
-  const rows = expenses.filter((e) => Number(e.amount) > 0 && expenseSlug(e) === slug);
+  const rows = expenses.filter((e) => Number(e.amount) > 0 && !e.from_reward && expenseSlug(e) === slug);
   const total = rows.reduce((s, e) => s + Number(e.amount), 0);
 
   return (
@@ -3180,52 +3439,7 @@ function CategoryActivityScreen({
         </section>
       </div>
 
-      <BottomNav tab="analytics" onHome={onHome} onGoals={onGoals} onAnalytics={onBack} />
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  unit,
-  className = "",
-}: {
-  label: string;
-  value: string;
-  unit?: string;
-  className?: string;
-}) {
-  return (
-    <div className={`flex flex-1 flex-col items-center text-center ${className}`}>
-      <span className="text-[11px] text-[#a9a9b0]">{label}</span>
-      <span className="mt-1 text-[26px] leading-none text-[#2b2b2b]">
-        {value}
-        {unit && <span className="ml-1 text-[15px] text-[#2b2b2b]">{unit}</span>}
-      </span>
-    </div>
-  );
-}
-
-function SplitPerson({
-  person,
-  amount,
-  heartColor,
-  align = "left",
-}: {
-  person: Person;
-  amount: number;
-  heartColor: string;
-  align?: "left" | "right";
-}) {
-  return (
-    <div className={`flex flex-col ${align === "right" ? "items-end" : "items-start"}`}>
-      <Avatar person={person} size={40} />
-      <span className="mt-1 flex items-center gap-1 text-[14px] text-[#2b2b2b]">
-        {NAME[person]}
-        <HeartIcon className="w-3" color={heartColor} />
-      </span>
-      <span className="text-[15px] text-[#2b2b2b]">{money(amount)}</span>
+      <BottomNav tab="analytics" onHome={onHome} onGoals={onGoals} onAnalytics={onBack} onRewards={onRewards} />
     </div>
   );
 }
@@ -3257,6 +3471,638 @@ function ConfirmDeleteGoalModal({
           “{goal.title}”
           {saved > 0 ? ` — ${money(saved)} goes back to the bank.` : ""}
         </p>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-[14px] bg-[#f1f2f6] py-2.5 text-[15px] text-[#2b2b2b] transition active:scale-[0.99]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 rounded-[14px] bg-[#e4544c] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(212,69,62,0.32)] transition active:scale-[0.99]"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Rewards screen                                                    */
+/* ------------------------------------------------------------------ */
+
+// Visual treatment per reward state — the pill on cards and the accent ring.
+const REWARD_STATUS_META: Record<RewardStatus, { label: string; bg: string; fg: string }> = {
+  locked: { label: "Locked", bg: "#f1f2f6", fg: "#8d8d93" },
+  ready: { label: "Ready to claim", bg: "#e6f7ef", fg: "#1f9d63" },
+  claimed: { label: "Claimed", bg: "#eef3fb", fg: "#2f63e6" },
+};
+
+// "$5" for a cash reward, otherwise the title carries the meaning on its own.
+function rewardAmountLabel(r: Reward): string | null {
+  if (r.kind !== "cash") return null;
+  const n = Number(r.amount);
+  return Number.isFinite(n) && n > 0 ? money(n) : null;
+}
+
+function StatusPill({ status }: { status: RewardStatus }) {
+  const m = REWARD_STATUS_META[status];
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] leading-none"
+      style={{ backgroundColor: m.bg, color: m.fg }}
+    >
+      {status === "locked" && <LockIcon className="w-3" color={m.fg} />}
+      {status === "ready" && <span aria-hidden>✨</span>}
+      {status === "claimed" && <CheckIcon className="w-3" color={m.fg} />}
+      {m.label}
+    </span>
+  );
+}
+
+// "+ New reward" pill, mirrors NewGoalButton.
+function NewRewardButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1 rounded-full border border-[#cdd9f0] bg-white px-3 py-1.5 text-[13px] text-[#2f63e6] transition active:scale-95"
+    >
+      <PlusIcon className="w-3.5" />
+      New reward
+    </button>
+  );
+}
+
+// One reward card: photo · reward + task · status, with the cash value (if any)
+// as a badge. Tapping anywhere opens the detail sheet.
+function RewardCard({ reward, onDetails }: { reward: Reward; onDetails: (r: Reward) => void }) {
+  const status = rewardStatus(reward);
+  const amount = rewardAmountLabel(reward);
+  return (
+    <button
+      type="button"
+      onClick={() => onDetails(reward)}
+      className={`flex w-full items-center gap-3 rounded-[18px] bg-white px-3.5 py-3 text-left shadow-[0_6px_16px_rgba(120,150,200,0.12)] transition active:scale-[0.99] ${
+        status === "claimed" ? "opacity-75" : ""
+      }`}
+    >
+      <RewardImage url={reward.image_url} size={52} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className={`min-w-0 flex-1 truncate text-[15px] leading-tight text-[#2b2b2b] ${status === "claimed" ? "line-through decoration-[#c2c2c8]" : ""}`}>
+            {reward.title}
+          </span>
+          {amount && (
+            <span className="shrink-0 rounded-full bg-[#e7f1fd] px-2 py-[2px] text-[13px] text-[#2f63e6]">
+              {amount}
+            </span>
+          )}
+        </span>
+        <span className="mt-0.5 flex items-center gap-1 text-[12px] text-[#a9a9b0]">
+          <FlagIcon className="w-3 shrink-0" color="#bcbfc7" />
+          <span className="min-w-0 truncate">{reward.task}</span>
+        </span>
+        <span className="mt-1.5 flex items-center gap-2">
+          <StatusPill status={status} />
+          {reward.person && (
+            <span className="flex items-center gap-1 text-[11px] text-[#a9a9b0]">
+              <Avatar person={reward.person} size={16} />
+              {NAME[reward.person]}
+            </span>
+          )}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function RewardsScreen({
+  rewards,
+  expenses,
+  loading,
+  error,
+  onHome,
+  onGoals,
+  onAnalytics,
+  onNewReward,
+  onDetails,
+}: {
+  rewards: Reward[];
+  expenses: Expense[];
+  loading: boolean;
+  error: string | null;
+  onHome: () => void;
+  onGoals: () => void;
+  onAnalytics: () => void;
+  onNewReward: () => void;
+  onDetails: (r: Reward) => void;
+}) {
+  // Active = anything not yet claimed, with ready-to-claim floated to the top so
+  // the thing you've earned is the first thing you see. Claimed sits below.
+  const active = rewards
+    .filter((r) => rewardStatus(r) !== "claimed")
+    .sort((a, b) => Number(rewardStatus(b) === "ready") - Number(rewardStatus(a) === "ready"));
+  const claimed = rewards.filter((r) => rewardStatus(r) === "claimed");
+  const readyCount = rewards.filter((r) => rewardStatus(r) === "ready").length;
+
+  // Spendable reward money per person = earned (claimed cash) − spent through
+  // reward-funded transactions. "Anyone" rewards don't land in either card.
+  const { available, spent } = computeRewardMoney(rewards, expenses);
+
+  return (
+    <div className="relative mx-auto flex min-h-dvh w-full max-w-[420px] flex-col">
+      <div className="flex flex-1 flex-col gap-3 px-4 pb-20 pt-[max(env(safe-area-inset-top),14px)]">
+        <GoalsHeader title="Rewards" />
+
+        {error && <p className="text-center text-[12px] text-[#d4453e]">{error}</p>}
+
+        {/* ---- reward money — each person has their own card ---- */}
+        {!loading && (
+          <div className="grid grid-cols-2 gap-3">
+            {([
+              { person: "luca" as Person, bg: "#e7f1fd" },
+              { person: "irish" as Person, bg: "#fbeef6" },
+            ]).map(({ person, bg }) => (
+              <section
+                key={person}
+                className="rounded-[20px] px-3 pt-4 pb-3.5 text-center shadow-[0_8px_24px_rgba(120,150,200,0.16)]"
+                style={{ backgroundColor: bg }}
+              >
+                <div className="flex justify-center">
+                  <Avatar person={person} size={40} />
+                </div>
+                <p className="mt-1 text-[13px] text-[#3a3a3a]">{NAME[person]}</p>
+                <p className="font-daruma mt-1 text-[34px] leading-none text-[#2b2b2b]">
+                  {money(Math.max(0, available[person]))}
+                </p>
+                <p className="mt-1 flex items-center justify-center gap-1 text-[10px] text-[#8d8d93]">
+                  <GiftIcon className="w-3" color="#b9a0b3" />
+                  {spent[person] > 0 ? `reward money · ${money(spent[person])} spent` : "reward money"}
+                </p>
+              </section>
+            ))}
+          </div>
+        )}
+
+        {loading ? null : rewards.length === 0 ? (
+          /* ---- empty state ---- */
+          <section className="rounded-[22px] bg-white px-5 py-8 text-center shadow-[0_8px_24px_rgba(120,150,200,0.14)]">
+            <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#fbeef6]">
+              <GiftIcon className="w-7" color="#d98bbd" />
+            </span>
+            <p className="text-[15px] text-[#2b2b2b]">No rewards yet</p>
+            <p className="mt-1 text-[12px] text-[#a9a9b0]">
+              Pick a treat, then set the task to unlock it.
+            </p>
+            <button
+              type="button"
+              onClick={onNewReward}
+              className="mx-auto mt-4 flex items-center gap-1.5 rounded-full border border-[#cdd9f0] bg-white px-4 py-2 text-[14px] text-[#2f63e6] transition active:scale-95"
+            >
+              <PlusIcon className="w-4" />
+              New reward
+            </button>
+          </section>
+        ) : (
+          <>
+            {/* ---- the gating concept, stated once ---- */}
+            <section className="flex items-center gap-3 rounded-[22px] bg-[#e7f1fd] px-4 py-3 shadow-[0_8px_24px_rgba(120,150,200,0.16)]">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/70">
+                <GiftIcon className="w-5" color="#5181d4" />
+              </span>
+              <p className="text-[12px] leading-snug text-[#3a3a3a]">
+                {readyCount > 0
+                  ? `You’ve earned ${readyCount} reward${readyCount === 1 ? "" : "s"} — go claim ${readyCount === 1 ? "it" : "them"}! 🎉`
+                  : "Do the task, then claim your reward. No task, no treat."}
+              </p>
+            </section>
+
+            {/* ---- active rewards ---- */}
+            <section className="rounded-[24px] bg-[#eaf2fd]/85 px-3.5 pb-3 pt-3 shadow-[0_10px_30px_rgba(120,150,200,0.18)] backdrop-blur-sm">
+              <div className="mb-2.5 flex items-center justify-between px-1">
+                <h2 className="text-[16px] text-[#2b2b2b]">To earn</h2>
+                <NewRewardButton onClick={onNewReward} />
+              </div>
+
+              {active.length === 0 ? (
+                <div className="rounded-[18px] bg-white px-4 py-5 text-center shadow-[0_6px_16px_rgba(120,150,200,0.12)]">
+                  <p className="text-[12px] text-[#a9a9b0]">All caught up — every reward is claimed. Tap “New reward” to add one.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {active.map((r) => (
+                    <RewardCard key={r.id} reward={r} onDetails={onDetails} />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* ---- claimed ---- */}
+            {claimed.length > 0 && (
+              <section className="rounded-[24px] bg-[#eaf2fd]/85 px-3.5 pb-3 pt-3 shadow-[0_10px_30px_rgba(120,150,200,0.18)] backdrop-blur-sm">
+                <h2 className="mb-2.5 px-1 text-[16px] text-[#2b2b2b]">Claimed 🎉</h2>
+                <div className="flex flex-col gap-2">
+                  {claimed.map((r) => (
+                    <RewardCard key={r.id} reward={r} onDetails={onDetails} />
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+      </div>
+
+      <BottomNav tab="rewards" onHome={onHome} onGoals={onGoals} onAnalytics={onAnalytics} onRewards={() => {}} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reward modals                                                     */
+/* ------------------------------------------------------------------ */
+
+// Read-only detail sheet for one reward. The primary action follows the state:
+// locked → mark the task done; ready → claim the reward; claimed → celebrate
+// (with an escape hatch to un-claim). Edit / remove always available.
+function RewardDetailModal({
+  reward,
+  onClose,
+  onToggleDone,
+  onToggleClaim,
+  onEdit,
+  onDelete,
+}: {
+  reward: Reward;
+  onClose: () => void;
+  onToggleDone: (done: boolean) => Promise<void> | void;
+  onToggleClaim: (claimed: boolean) => Promise<void> | void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const status = rewardStatus(reward);
+  const amount = rewardAmountLabel(reward);
+
+  async function run(fn: () => Promise<void> | void) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 px-4 pb-6 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[22px] bg-white p-4 shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <h2 className="mb-3 text-center text-[16px] text-[#2b2b2b]">Reward</h2>
+
+        {/* photo + title */}
+        <div className="flex items-center gap-3">
+          <RewardImage url={reward.image_url} size={56} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[17px] leading-tight text-[#2b2b2b]">{reward.title}</p>
+            <div className="mt-1 flex items-center gap-2">
+              <StatusPill status={status} />
+              {reward.person && (
+                <span className="flex items-center gap-1 text-[11px] text-[#a9a9b0]">
+                  <Avatar person={reward.person} size={16} />
+                  {NAME[reward.person]}
+                </span>
+              )}
+            </div>
+          </div>
+          {amount && <span className="shrink-0 text-[22px] text-[#2f63e6]">{amount}</span>}
+        </div>
+
+        {/* the task that gates it */}
+        <div className="mt-3 rounded-[14px] bg-[#f7f8fb] px-3.5 py-3">
+          <p className="text-[11px] uppercase tracking-wide text-[#a9a9b0]">Task to unlock</p>
+          <p className="mt-1 flex items-start gap-1.5 text-[14px] leading-snug text-[#2b2b2b]">
+            <FlagIcon className="mt-0.5 w-4 shrink-0" color="#5181d4" />
+            <span>{reward.task}</span>
+          </p>
+          {reward.done_at && (
+            <p className="mt-2 text-[12px] text-[#1f9d63]">✓ Task done · {shortDate(reward.done_at)}</p>
+          )}
+        </div>
+
+        {/* state-driven primary action */}
+        {status === "locked" && (
+          <button
+            type="button"
+            onClick={() => run(() => onToggleDone(true))}
+            disabled={busy}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
+          >
+            <CheckIcon className="w-[18px]" color="#ffffff" />
+            Mark task complete
+          </button>
+        )}
+
+        {status === "ready" && (
+          <>
+            <button
+              type="button"
+              onClick={() => run(() => onToggleClaim(true))}
+              disabled={busy}
+              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-[14px] bg-gradient-to-b from-[#46c088] to-[#23a86f] py-3 text-[16px] text-white shadow-[0_6px_14px_rgba(34,168,111,0.35)] transition active:scale-[0.99] disabled:opacity-50"
+            >
+              <GiftIcon className="w-5" color="#ffffff" />
+              Claim reward 🎉
+            </button>
+            <button
+              type="button"
+              onClick={() => run(() => onToggleDone(false))}
+              disabled={busy}
+              className="mt-2 w-full rounded-[14px] bg-[#f1f2f6] py-2 text-[13px] text-[#8d8d93] transition active:scale-[0.99] disabled:opacity-50"
+            >
+              Task not done yet
+            </button>
+          </>
+        )}
+
+        {status === "claimed" && (
+          <>
+            <div className="mt-3 flex items-center justify-center gap-2 rounded-[14px] bg-[#e6f7ef] py-3 text-[15px] text-[#1f9d63]">
+              <CheckIcon className="w-5" color="#1f9d63" />
+              Claimed{reward.claimed_at ? ` on ${shortDate(reward.claimed_at)}` : ""} 🎉
+            </div>
+            <button
+              type="button"
+              onClick={() => run(() => onToggleClaim(false))}
+              disabled={busy}
+              className="mt-2 w-full rounded-[14px] bg-[#f1f2f6] py-2 text-[13px] text-[#8d8d93] transition active:scale-[0.99] disabled:opacity-50"
+            >
+              Un-claim
+            </button>
+          </>
+        )}
+
+        {/* edit / remove */}
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-[#fdecec] py-2.5 text-[15px] text-[#d4453e] transition active:scale-[0.99]"
+          >
+            <TrashIcon className="w-[18px]" color="#d4453e" />
+            Remove
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-[#f1f2f6] py-2.5 text-[15px] text-[#2b2b2b] transition active:scale-[0.99]"
+          >
+            <PencilIcon className="w-[18px]" color="#2b2b2b" />
+            Edit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// New / edit reward sheet. Reward name + the task that gates it, a treat/cash
+// toggle (cash reveals a dollar field), an optional photo, and who it's for.
+function RewardFormModal({
+  reward,
+  onClose,
+  onSave,
+}: {
+  reward?: Reward;
+  onClose: () => void;
+  onSave: (next: {
+    title: string;
+    task: string;
+    kind: "treat" | "cash";
+    amount: number | null;
+    person: Person | null;
+    image_url: string | null;
+  }) => Promise<boolean>;
+}) {
+  const [title, setTitle] = useState(reward?.title ?? "");
+  const [task, setTask] = useState(reward?.task ?? "");
+  const [kind, setKind] = useState<"treat" | "cash">(reward?.kind ?? "treat");
+  const initialAmount = reward?.amount != null ? Number(reward.amount) : NaN;
+  const [amount, setAmount] = useState(
+    Number.isFinite(initialAmount) ? (Number.isInteger(initialAmount) ? String(initialAmount) : initialAmount.toFixed(2)) : "",
+  );
+  // "anyone" maps to a null person (a shared reward).
+  const [who, setWho] = useState<"anyone" | Person>(reward?.person ?? "anyone");
+  const [imageUrl, setImageUrl] = useState<string | null>(reward?.image_url ?? null);
+  const [preview, setPreview] = useState<string | null>(reward?.image_url ?? null);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [imgError, setImgError] = useState<string | null>(null);
+
+  const amountValue = Number(amount);
+  const amountOk = kind === "treat" || (Number.isFinite(amountValue) && amountValue > 0);
+  const valid = title.trim() !== "" && task.trim() !== "" && amountOk;
+
+  function pickFile(f: File | null) {
+    if (!f) return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+    setImgError(null);
+  }
+
+  async function commit() {
+    if (!valid || busy) return;
+    setBusy(true);
+    setImgError(null);
+
+    let url = imageUrl;
+    if (file) {
+      url = await uploadGoalImage(file); // reuses the public `goals` bucket
+      if (!url) {
+        setImgError("Couldn't upload that photo. Try another one.");
+        setBusy(false);
+        return;
+      }
+      setImageUrl(url);
+    }
+
+    const ok = await onSave({
+      title: title.trim(),
+      task: task.trim(),
+      kind,
+      amount: kind === "cash" ? amountValue : null,
+      person: who === "anyone" ? null : who,
+      image_url: url,
+    });
+    if (!ok) setBusy(false); // on success the modal unmounts; on failure, re-enable
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 px-4 pb-6 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[88dvh] w-full max-w-[420px] overflow-y-auto rounded-[22px] bg-white p-4 shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <h2 className="mb-3 text-center text-[16px] text-[#2b2b2b]">
+          {reward ? "Edit reward" : "New reward"}
+        </h2>
+
+        {/* photo picker */}
+        <label className="mb-3 flex cursor-pointer items-center gap-3">
+          <span className="relative flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-[#fbeef6] ring-1 ring-[#f0d9e8]">
+            {preview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={preview} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <CameraIcon className="w-7" color="#d98bbd" />
+            )}
+          </span>
+          <span className="text-[13px] text-[#2f63e6]">
+            {preview ? "Change photo" : "Add a photo of the reward (optional)"}
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        {imgError && <p className="mb-2 text-[12px] text-[#d4453e]">{imgError}</p>}
+
+        {/* reward name */}
+        <div className="mb-2.5 flex items-center gap-2 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+          <GiftIcon className="w-4 shrink-0" color="#9a9aa0" />
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="The reward (e.g. Lash extensions)"
+            className="w-full bg-transparent text-[15px] text-[#2b2b2b] outline-none placeholder:text-[#aeb1b9]"
+          />
+        </div>
+
+        {/* treat / cash toggle */}
+        <div className="mb-2.5 flex overflow-hidden rounded-[14px] border border-[#e7e9ef]">
+          {(["treat", "cash"] as const).map((k) => {
+            const active = kind === k;
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKind(k)}
+                className={`flex-1 py-2 text-[14px] transition ${
+                  active ? "bg-[#dbe3f6] text-[#2f63e6]" : "text-[#8d8d93]"
+                }`}
+              >
+                {k === "treat" ? "A treat" : "Cash"}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* cash amount, only when kind === cash */}
+        {kind === "cash" && (
+          <div className="mb-2.5 flex items-center gap-1.5 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+            <span className="text-[18px] text-[#2b2b2b]">$</span>
+            <input
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="How much? (e.g. 5)"
+              className="w-full bg-transparent text-[16px] text-[#2b2b2b] outline-none placeholder:text-[#c3c6ce]"
+            />
+          </div>
+        )}
+
+        {/* the gating task */}
+        <div className="mb-2.5 flex items-center gap-2 rounded-[14px] bg-white px-3 py-2.5 ring-1 ring-[#e7e9ef]">
+          <FlagIcon className="w-4 shrink-0" color="#9a9aa0" />
+          <input
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            placeholder="What do you have to do for it?"
+            className="w-full bg-transparent text-[14px] text-[#2b2b2b] outline-none placeholder:text-[#aeb1b9]"
+          />
+        </div>
+
+        {/* who it's for */}
+        <p className="mb-1.5 text-[12px] text-[#8d8d93]">Who&apos;s it for?</p>
+        <div className="mb-3 flex gap-2">
+          {(["anyone", "luca", "irish"] as const).map((opt) => {
+            const active = who === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setWho(opt)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-[14px] py-2 text-[14px] transition ${
+                  active ? "border border-[#a3b8e6] bg-[#dbe3f6] text-[#2b2b2b]" : "border border-[#e7e9ef] text-[#8d8d93]"
+                }`}
+              >
+                {opt !== "anyone" && <Avatar person={opt} size={22} />}
+                {opt === "anyone" ? "Anyone" : NAME[opt]}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-[14px] bg-[#f1f2f6] py-2.5 text-[15px] text-[#2b2b2b] transition active:scale-[0.99]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={commit}
+            disabled={!valid || busy}
+            className="flex-1 rounded-[14px] bg-gradient-to-b from-[#6790dc] to-[#5181d4] py-2.5 text-[15px] text-white shadow-[0_6px_14px_rgba(88,136,216,0.35)] transition active:scale-[0.99] disabled:opacity-50"
+          >
+            {busy ? "Saving…" : reward ? "Save" : "Create reward"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDeleteRewardModal({
+  reward,
+  onCancel,
+  onConfirm,
+}: {
+  reward: Reward;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 px-6 backdrop-blur-[2px]"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-[320px] rounded-[22px] bg-white p-5 text-center shadow-[0_12px_40px_rgba(60,90,150,0.3)]"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#fdecec]">
+          <TrashIcon className="w-6" color="#d4453e" />
+        </span>
+        <h2 className="text-[16px] text-[#2b2b2b]">Remove reward?</h2>
+        <p className="mt-1 text-[13px] text-[#8d8d93]">“{reward.title}”</p>
         <div className="mt-4 flex gap-2">
           <button
             type="button"
