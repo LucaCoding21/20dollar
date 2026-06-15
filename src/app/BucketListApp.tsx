@@ -13,30 +13,80 @@ import { supabase, type BucketItem } from "@/lib/supabase";
 type Category = {
   slug: string;
   label: string;
-  emoji: string;
   color: string;
   soft: string;
 };
 
 const CATEGORIES: Category[] = [
-  { slug: "travel", label: "Travel", emoji: "✈️", color: "#3b9ae1", soft: "#e7f2fc" },
-  { slug: "movies", label: "Movies", emoji: "🎬", color: "#7c6cf0", soft: "#ecebfd" },
-  { slug: "food", label: "Food", emoji: "🍜", color: "#f0883e", soft: "#fdeede" },
-  { slug: "outdoor", label: "Outdoor", emoji: "🏔️", color: "#33a06c", soft: "#e3f5ec" },
-  { slug: "sidequests", label: "Sidequests", emoji: "⚡", color: "#e0a528", soft: "#fbf2da" },
-  { slug: "sports", label: "Sports", emoji: "🏀", color: "#e9605a", soft: "#fce9e8" },
-  { slug: "music", label: "Music", emoji: "🎵", color: "#e060a8", soft: "#fce8f3" },
-  { slug: "learn", label: "Learn", emoji: "📚", color: "#2baf9f", soft: "#ddf4f1" },
-  { slug: "create", label: "Create", emoji: "🎨", color: "#b06bd6", soft: "#f5e9fb" },
+  { slug: "movies", label: "Movies", color: "#7c6cf0", soft: "#ecebfd" },
+  { slug: "food", label: "Food", color: "#f0883e", soft: "#fdeede" },
+  { slug: "outdoor", label: "Outdoor", color: "#33a06c", soft: "#e3f5ec" },
+  { slug: "sports", label: "Sports", color: "#e9605a", soft: "#fce9e8" },
 ];
 
 const CAT_BY_SLUG: Record<string, Category> = Object.fromEntries(
   CATEGORIES.map((c) => [c.slug, c]),
 );
-const FALLBACK_CAT = CATEGORIES.find((c) => c.slug === "sidequests")!;
+const FALLBACK_CAT = CATEGORIES[0];
 
 function catOf(slug: string): Category {
   return CAT_BY_SLUG[slug] ?? FALLBACK_CAT;
+}
+
+// A clean line icon per category (plus "all"), drawn in the active color. Stroke
+// styling is inherited from the parent <svg>; only fills are set per-shape.
+function CategoryIcon({
+  slug,
+  className = "",
+  color = "#2b2b2b",
+  size,
+}: {
+  slug: string;
+  className?: string;
+  color?: string;
+  size?: number;
+}) {
+  const shapes: Record<string, React.ReactNode> = {
+    all: <path d="M12 2.5l2.1 6.4 6.4 2.1-6.4 2.1L12 19.5l-2.1-6.4L3.5 11l6.4-2.1z" />,
+    movies: (
+      <>
+        <path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3L20.2 6Z" />
+        <path d="m6.2 5.3 3.1 3.9" />
+        <path d="m12.4 3.4 3.1 4" />
+        <path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      </>
+    ),
+    food: (
+      <>
+        <path d="M4 13h16a8 8 0 0 1-16 0Z" />
+        <path d="M9 5c.6.7.6 1.5 0 2.2s-.6 1.5 0 2.2" />
+        <path d="M14 5c.6.7.6 1.5 0 2.2s-.6 1.5 0 2.2" />
+      </>
+    ),
+    outdoor: <path d="M3 20 9.5 8l3.3 5.8L15 11l5 9H3Z" />,
+    sports: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M4.5 7.5c4.5 3 10.5 3 15 0" />
+        <path d="M4.5 16.5c4.5-3 10.5-3 15 0" />
+      </>
+    ),
+  };
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`shrink-0 ${className}`}
+      style={size ? { width: size, height: size } : undefined}
+      fill="none"
+      stroke={color}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      {shapes[slug] ?? shapes.all}
+    </svg>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -188,7 +238,7 @@ async function uploadBucketImage(file: File): Promise<string | null> {
   return supabase.storage.from("goals").getPublicUrl(path).data.publicUrl;
 }
 
-// A square visual for an item: its photo, or a category-tinted emoji tile so
+// A square visual for an item: its photo, or a category-tinted icon tile so
 // every item still reads as something at a glance.
 function Thumb({ item, size, className = "" }: { item: BucketItem; size: number; className?: string }) {
   const cat = catOf(item.category);
@@ -206,9 +256,9 @@ function Thumb({ item, size, className = "" }: { item: BucketItem; size: number;
   return (
     <span
       className={`flex shrink-0 items-center justify-center rounded-[14px] ${className}`}
-      style={{ width: size, height: size, backgroundColor: cat.soft, fontSize: size * 0.42 }}
+      style={{ width: size, height: size, backgroundColor: cat.soft }}
     >
-      {cat.emoji}
+      <CategoryIcon slug={cat.slug} color={cat.color} size={Math.round(size * 0.5)} />
     </span>
   );
 }
@@ -330,7 +380,7 @@ function BucketCard({
           className="mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
           style={{ backgroundColor: cat.soft, color: cat.color }}
         >
-          <span>{cat.emoji}</span>
+          <CategoryIcon slug={cat.slug} color={cat.color} className="w-3" />
           {cat.label}
         </span>
       </div>
@@ -345,14 +395,14 @@ function BucketCard({
 function Pill({
   active,
   label,
-  emoji,
+  slug,
   color,
   count,
   onClick,
 }: {
   active: boolean;
   label: string;
-  emoji: string;
+  slug: string;
   color: string;
   count?: number;
   onClick: () => void;
@@ -368,7 +418,7 @@ function Pill({
           : { backgroundColor: "rgba(255,255,255,0.82)", color: "#5a6678" }
       }
     >
-      <span>{emoji}</span>
+      <CategoryIcon slug={slug} color={active ? "#fff" : color} className="w-4" />
       <span className="whitespace-nowrap">{label}</span>
       {typeof count === "number" && count > 0 && (
         <span
@@ -678,7 +728,7 @@ export default function BucketListApp({ onExit }: { onExit: () => void }) {
             <Pill
               active={activeFilter === "all"}
               label="All"
-              emoji="✨"
+              slug="all"
               color="#5181d4"
               count={stats.total}
               onClick={() => setFilter("all")}
@@ -688,7 +738,7 @@ export default function BucketListApp({ onExit }: { onExit: () => void }) {
                 key={c.slug}
                 active={activeFilter === c.slug}
                 label={c.label}
-                emoji={c.emoji}
+                slug={c.slug}
                 color={c.color}
                 count={counts[c.slug]}
                 onClick={() => setFilter(c.slug)}
@@ -830,7 +880,7 @@ function ActionSheet({
               className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
               style={{ backgroundColor: cat.soft, color: cat.color }}
             >
-              <span>{cat.emoji}</span>
+              <CategoryIcon slug={cat.slug} color={cat.color} className="w-3.5" />
               {cat.label}
             </span>
           </div>
@@ -902,7 +952,7 @@ function ItemFormModal({
 }) {
   const [title, setTitle] = useState(item?.title ?? "");
   const [note, setNote] = useState(item?.note ?? "");
-  const [category, setCategory] = useState(item?.category ?? "sidequests");
+  const [category, setCategory] = useState(item?.category ?? FALLBACK_CAT.slug);
   const [imageUrl, setImageUrl] = useState<string | null>(item?.image_url ?? null);
   const [preview, setPreview] = useState<string | null>(item?.image_url ?? null);
   const [file, setFile] = useState<File | null>(null);
@@ -1012,7 +1062,7 @@ function ItemFormModal({
                     : { backgroundColor: c.soft, color: c.color }
                 }
               >
-                <span>{c.emoji}</span>
+                <CategoryIcon slug={c.slug} color={active ? "#fff" : c.color} className="w-4" />
                 {c.label}
               </button>
             );

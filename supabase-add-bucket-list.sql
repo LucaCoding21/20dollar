@@ -9,7 +9,7 @@ create table if not exists public.bucket_items (
   created_at timestamptz not null    default now(),
   title      text        not null,                       -- the thing to do
   note       text,                                       -- optional details
-  category   text        not null default 'sidequests',  -- category slug
+  category   text        not null default 'movies',       -- category slug
   image_url  text,                                       -- optional photo (goals bucket)
   done       boolean     not null default false,
   done_at    timestamptz                                 -- when it was checked off
