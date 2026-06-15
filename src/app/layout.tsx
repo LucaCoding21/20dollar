@@ -3,6 +3,17 @@ import { Darumadrop_One, Comic_Relief } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegister from "./sw-register";
 
+// The very first thing the app does on load is fetch from Supabase. Opening the
+// TCP + TLS connection to that origin up front (in parallel with parsing the
+// page) shaves a round-trip off that first query on slow networks.
+const SUPABASE_ORIGIN = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).origin;
+  } catch {
+    return null;
+  }
+})();
+
 // Darumadrop One is kept for the big Shared Bank total only.
 const daruma = Darumadrop_One({
   variable: "--font-daruma",
@@ -44,6 +55,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${daruma.variable} ${comic.variable} h-full antialiased`}>
+      <head>
+        {SUPABASE_ORIGIN && (
+          <>
+            <link rel="preconnect" href={SUPABASE_ORIGIN} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={SUPABASE_ORIGIN} />
+          </>
+        )}
+        {/* GIPHY is only hit when the gif picker opens, but warming DNS is cheap. */}
+        <link rel="dns-prefetch" href="https://api.giphy.com" />
+      </head>
       <body className="min-h-full flex flex-col bg-[#bfdcf5] font-comic">
         {children}
         <ServiceWorkerRegister />

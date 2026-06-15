@@ -62,3 +62,18 @@ export type FoodItem = {
   image_url: string | null;
   tier: FoodTier | null;
 };
+
+// A "bucket list" entry in the shared Bucket List app: something Luca & Irish
+// want to do one day. `category` is one of the slugs in CATEGORIES (see
+// BucketListApp). `image_url` points at a photo in the public `goals` bucket
+// (reused for all uploads). An item starts unchecked and is `done` once ticked.
+export type BucketItem = {
+  id: string;
+  created_at: string;
+  title: string;
+  note: string | null;
+  category: string; // category slug, see CATEGORIES in BucketListApp
+  image_url: string | null;
+  done: boolean;
+  done_at: string | null; // when it was checked off
+};
