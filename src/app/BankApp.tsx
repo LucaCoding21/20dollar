@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, type Expense, type Goal, type Person, type Reward } from "@/lib/supabase";
-import { bankBalance, DAILY_ALLOWANCE } from "@/lib/bank";
+import { bankBalance, countsAgainstBank, DAILY_ALLOWANCE } from "@/lib/bank";
 
 /* ------------------------------------------------------------------ */
 /*  Data (matches the reference mockup 1:1)                            */
@@ -758,9 +758,15 @@ export default function BankApp({ onExitToApps }: { onExitToApps?: () => void })
   }, [load]);
 
   // Reward-funded spends draw down the reward wallet, not the $20 bank, so they
-  // don't count toward the bank balance.
+  // don't count toward the bank balance. Spending from before the reset is
+  // historical (still shown in activity/analytics) and doesn't touch the bank.
   const totalSpent = useMemo(
-    () => expenses.reduce((sum, e) => (e.from_reward ? sum : sum + Number(e.amount)), 0),
+    () =>
+      expenses.reduce(
+        (sum, e) =>
+          e.from_reward || !countsAgainstBank(e.created_at) ? sum : sum + Number(e.amount),
+        0,
+      ),
     [expenses],
   );
   // Money parked in goals is set aside from the bank, so it shrinks the
