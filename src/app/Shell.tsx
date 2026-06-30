@@ -22,11 +22,12 @@ function AppLoading() {
 const BankApp = dynamic(() => import("./BankApp"), { ssr: false, loading: AppLoading });
 const FoodTierApp = dynamic(() => import("./FoodTierApp"), { ssr: false, loading: AppLoading });
 const BucketListApp = dynamic(() => import("./BucketListApp"), { ssr: false, loading: AppLoading });
+const WindApp = dynamic(() => import("./WindApp"), { ssr: false, loading: AppLoading });
 
 // The little "OS": a launcher home screen with one tile per app. Each app gets
 // a way back here (the "⊞ apps" button inside it). Which app is open is just
 // state — no router — so returning to an app keeps its own internal screen.
-type AppId = "launcher" | "budget" | "food" | "bucket";
+type AppId = "launcher" | "budget" | "food" | "bucket" | "wind";
 
 export default function Shell() {
   const [app, setApp] = useState<AppId>("launcher");
@@ -34,6 +35,7 @@ export default function Shell() {
   if (app === "budget") return <BankApp onExitToApps={() => setApp("launcher")} />;
   if (app === "food") return <FoodTierApp onExit={() => setApp("launcher")} />;
   if (app === "bucket") return <BucketListApp onExit={() => setApp("launcher")} />;
+  if (app === "wind") return <WindApp onExit={() => setApp("launcher")} />;
   return <Launcher onOpen={setApp} />;
 }
 
@@ -113,6 +115,12 @@ function Launcher({ onOpen }: { onOpen: (app: AppId) => void }) {
           imageSrc="/bucket.webp"
           gradient="bg-gradient-to-b from-[#cdd9f0] to-[#aebfe0]"
           onClick={() => onOpen("bucket")}
+        />
+        <AppTile
+          label="Wind"
+          imageSrc="/wind.svg"
+          gradient="bg-gradient-to-b from-[#9cc4f4] to-[#6790dc]"
+          onClick={() => onOpen("wind")}
         />
       </div>
     </div>

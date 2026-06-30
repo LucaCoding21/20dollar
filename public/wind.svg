@@ -1,0 +1,48 @@
+<svg width="140" height="140" viewBox="0 0 140 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wsky" x1="0" y1="0" x2="0" y2="140" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9cc4f4"/>
+      <stop offset="0.55" stop-color="#7aa8ee"/>
+      <stop offset="1" stop-color="#6790dc"/>
+    </linearGradient>
+    <linearGradient id="wfeather" x1="78" y1="38" x2="46" y2="82" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e7eefb"/>
+    </linearGradient>
+  </defs>
+
+  <!-- sky -->
+  <rect width="140" height="140" fill="url(#wsky)"/>
+
+  <!-- soft clouds -->
+  <g fill="#ffffff" opacity="0.92">
+    <ellipse cx="34" cy="34" rx="20" ry="11"/>
+    <ellipse cx="50" cy="36" rx="14" ry="9"/>
+    <ellipse cx="22" cy="38" rx="11" ry="8"/>
+  </g>
+  <g fill="#ffffff" opacity="0.55">
+    <ellipse cx="108" cy="104" rx="18" ry="9"/>
+    <ellipse cx="122" cy="106" rx="12" ry="7"/>
+  </g>
+
+  <!-- wind streaks -->
+  <g stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.85" fill="none">
+    <path d="M16 70 H58 a7 7 0 1 0 -7 -7"/>
+    <path d="M14 88 H44 a6 6 0 1 1 -6 6" opacity="0.7"/>
+    <path d="M20 56 H40" opacity="0.5"/>
+  </g>
+
+  <!-- badminton shuttlecock, tilted as if blown -->
+  <g transform="rotate(34 92 78)">
+    <!-- feather skirt -->
+    <path d="M92 50 L78 92 Q92 100 106 92 Z" fill="url(#wfeather)" stroke="#cdd9f0" stroke-width="1.6" stroke-linejoin="round"/>
+    <g stroke="#cdd9f0" stroke-width="1.4">
+      <path d="M92 54 L92 95"/>
+      <path d="M86 60 L85 93"/>
+      <path d="M98 60 L99 93"/>
+    </g>
+    <!-- cork base -->
+    <path d="M82 90 Q92 86 102 90 L100 100 Q92 106 84 100 Z" fill="#fff4e0" stroke="#e9c98e" stroke-width="1.6" stroke-linejoin="round"/>
+    <ellipse cx="92" cy="101" rx="9" ry="4" fill="#f3d9a6"/>
+  </g>
+</svg>

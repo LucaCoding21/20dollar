@@ -7,7 +7,7 @@
 //     once per asset — huge on slow wifi where these used to re-download).
 //   - Other cross-origin (GIPHY search API, etc.) → not handled, hits network.
 // Bump CACHE_VERSION to force-evict old caches on the next visit.
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
 const PAGE_CACHE = `pages-${CACHE_VERSION}`;
 const MEDIA_CACHE = `media-${CACHE_VERSION}`;
@@ -21,6 +21,8 @@ const PRECACHE = [
   "/clouds.webp",
   "/money.webp",
   "/ramen.webp",
+  "/bucket.webp",
+  "/wind.svg",
   "/icon.png",
   "/apple-icon.png",
   "/manifest.webmanifest",
